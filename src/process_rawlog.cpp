@@ -19,17 +19,18 @@
  |                                                                           |
  *---------------------------------------------------------------------------*/
 
-#include <mrpt/slam/CSimplePointsMap.h>
-#include <mrpt/slam/CObservation2DRangeScan.h>
+#include <mrpt/maps/CSimplePointsMap.h>
+#include <mrpt/obs/CObservation2DRangeScan.h>
+#include <mrpt/obs/CObservation3DRangeScan.h>
 #include <mrpt/slam/CICP.h>
-#include <mrpt/slam/CRawlog.h>
+#include <mrpt/obs/CRawlog.h>
 #include <mrpt/poses/CPose2D.h>
 #include <mrpt/poses/CPosePDF.h>
 #include <mrpt/poses/CPosePDFGaussian.h>
 #include <mrpt/gui.h>
 #include <mrpt/math/utils.h>
 #include <mrpt/system/threads.h>
-#include <mrpt/slam/CColouredPointsMap.h>
+#include <mrpt/maps/CColouredPointsMap.h>
 #include <mrpt/utils/CConfigFile.h>
 
 
@@ -42,6 +43,8 @@ using namespace mrpt::utils;
 using namespace mrpt::slam;
 using namespace std;
 using namespace mrpt::math;
+using namespace mrpt::poses;
+using namespace mrpt::obs;
 
 //mrpt::gui::CDisplayWindow3D  win3D;
 

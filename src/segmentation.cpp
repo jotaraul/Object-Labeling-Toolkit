@@ -20,17 +20,17 @@
  *---------------------------------------------------------------------------*/
 
 #include <mrpt/gui.h>
-#include <mrpt/slam/CColouredPointsMap.h>
+#include <mrpt/maps/CColouredPointsMap.h>
 
 #include <mrpt/math.h>
-#include <mrpt/slam/CObservation3DRangeScan.h>
+#include <mrpt/obs/CObservation3DRangeScan.h>
 #include <mrpt/opengl/CPointCloudColoured.h>
 #include <mrpt/opengl/CGridPlaneXY.h>
 #include <mrpt/opengl/CSphere.h>
 #include <mrpt/opengl/CArrow.h>
 #include <mrpt/opengl/CSetOfLines.h>
 #include <mrpt/opengl/CAxis.h>
-#include <mrpt/slam/CRawlog.h>
+#include <mrpt/obs/CRawlog.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/opengl.h>
 #include <mrpt/maps.h>
@@ -38,7 +38,7 @@
 
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
-#include <mrpt/slam/PCL_adapters.h>
+#include <mrpt/maps/PCL_adapters.h>
 #include <pcl/segmentation/organized_multi_plane_segmentation.h>
 #include <pcl/features/integral_image_normal.h>
 #include <pcl/filters/extract_indices.h>
@@ -60,7 +60,13 @@
 #include <pcl/filters/voxel_grid.h>
 
 using namespace mrpt::utils;
+using namespace mrpt::math;
+using namespace mrpt::opengl;
+using namespace mrpt::maps;
+using namespace mrpt::obs;
+using namespace mrpt::poses;
 using namespace mrpt;
+using namespace std;
 
 //
 //  Data types
@@ -333,10 +339,10 @@ bool poseDifferentEnough( CPose3D &pose, size_t sensor_index)
 
     CPose3D &lastPose = v_posesPerSensor[sensor_index][N_poses-1];
 
-    vector_double pose_v;
+    CVectorDouble pose_v;
     pose.getAsVector( pose_v );
 
-    vector_double lastPose_v;
+    CVectorDouble lastPose_v;
     lastPose.getAsVector( lastPose_v );
 
     float dist = lastPose.distance3DTo(pose_v[0], pose_v[1], pose_v[2]);
@@ -347,7 +353,7 @@ bool poseDifferentEnough( CPose3D &pose, size_t sensor_index)
 
     if ( dist > 0.2 )
         return true;
-    else if ( angle > RAD2DEG(10) )
+    else if ( angle > RAD2DEG((float)10) )
         return true;
     else
         return false;
@@ -935,7 +941,7 @@ int main(int argc, char* argv[])
         mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
         gl_points->setPointSize(6);
 
-        mrpt::slam::CColouredPointsMap colouredMap;
+        CColouredPointsMap colouredMap;
         colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
         colouredMap.loadFromRangeScan( *obs3D );
 
@@ -1071,7 +1077,7 @@ int main(int argc, char* argv[])
                     {
                         size_t N_inliers = v_indices.size();
 
-                        mrpt::slam::CColouredPointsMap region_pm;
+                        CColouredPointsMap region_pm;
 
                         for( size_t point_index = 0; point_index < N_inliers; point_index++ )
                         {
@@ -1173,7 +1179,7 @@ int main(int argc, char* argv[])
                         {
                             size_t N_inliers = v_indices.size();
 
-                            mrpt::slam::CColouredPointsMap region;
+                            CColouredPointsMap region;
 
                             for( size_t point_index = 0; point_index < N_inliers; point_index++ )
                             {

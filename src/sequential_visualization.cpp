@@ -20,22 +20,34 @@
  *---------------------------------------------------------------------------*/
 
 #include <mrpt/gui.h>
-#include <mrpt/slam/CColouredPointsMap.h>
+
+#include <mrpt/maps/CColouredPointsMap.h>
 
 #include <mrpt/math.h>
-#include <mrpt/slam/CObservation3DRangeScan.h>
+
+#include <mrpt/opengl.h>
 #include <mrpt/opengl/CPointCloudColoured.h>
 #include <mrpt/opengl/CGridPlaneXY.h>
 #include <mrpt/opengl/CSphere.h>
 #include <mrpt/opengl/CArrow.h>
 #include <mrpt/opengl/CSetOfLines.h>
 #include <mrpt/opengl/CAxis.h>
-#include <mrpt/slam/CRawlog.h>
+
+#include <mrpt/obs/CObservation3DRangeScan.h>
+#include <mrpt/obs/CRawlog.h>
+
 #include <mrpt/system/threads.h>
-#include <mrpt/opengl.h>
+
+#include <mrpt/poses/CPoint2D.h>
 
 using namespace mrpt::utils;
+using namespace mrpt::opengl;
+using namespace mrpt::obs;
+using namespace mrpt::maps;
+using namespace mrpt::poses;
+using namespace mrpt::math;
 using namespace mrpt;
+using namespace std;
 
 mrpt::gui::CDisplayWindow3D  win3D;
 gui::CDisplayWindowPlots	win("ICP results");
@@ -159,11 +171,11 @@ int main(int argc, char* argv[])
         obs3D->getSensorPose( pose );
         cout << "Pose: " << obs_index << " " << pose << endl;
 
-        vector_double coords,x,y;
+        CVectorDouble coords,x,y;
         pose.getAsVector( coords );
         x.push_back( coords[0] );
         y.push_back( coords[1] );
-        CPoint2D point(coords[0], coords[1]);
+        CPoint2D point((double)coords[0], (double)coords[1]);
         win.plot(x,y,"b.4");
 
         mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
@@ -171,10 +183,10 @@ int main(int argc, char* argv[])
         mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
         gl_points->setPointSize(6);
 
-        mrpt::slam::CColouredPointsMap colouredMap;
+        CColouredPointsMap colouredMap;
         colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
         colouredMap.loadFromRangeScan( *obs3D );
-        size_t N_points = colouredMap.getPointsCount();
+        size_t N_points = colouredMap.size();
 
         gl_points->loadFromPointsMap( &colouredMap );
 

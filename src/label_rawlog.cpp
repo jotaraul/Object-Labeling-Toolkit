@@ -20,17 +20,21 @@
  *---------------------------------------------------------------------------*/
 
 #include <mrpt/gui.h>
-#include <mrpt/slam/CColouredPointsMap.h>
+#include <mrpt/maps/CColouredPointsMap.h>
 
 #include <mrpt/math.h>
-#include <mrpt/slam/CObservation3DRangeScan.h>
+#include <mrpt/obs/CObservation3DRangeScan.h>
 #include <mrpt/opengl.h>
-#include <mrpt/slam/CRawlog.h>
+#include <mrpt/obs/CRawlog.h>
 #include <mrpt/system/threads.h>
 
 using namespace mrpt::utils;
 using namespace mrpt::gui;
+using namespace mrpt::math;
+using namespace mrpt::opengl;
+using namespace mrpt::poses;
 using namespace mrpt;
+using namespace std;
 
 //
 // GLOBAL VBLES/CONSTANTS
@@ -571,6 +575,9 @@ int main(int argc, char* argv[])
 
                 box->getBoxCorners(c1,c2);
 
+                vector<double> v_pose;
+                CVectorDouble v_pose2;
+
                 switch ( key )
                 {
                 // SIZE
@@ -619,7 +626,6 @@ int main(int argc, char* argv[])
                 }
                 case ( MRPTK_INSERT ) : // yaw
                 {
-                    vector_double v_pose,v_pose2;
                     boxPose.getAsVector(v_pose);
                     CPose3D move(0,0,0,OFFSET_ANGLES,0,0);
                     CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
@@ -631,7 +637,6 @@ int main(int argc, char* argv[])
                 }
                 case ( MRPTK_DELETE ) : // -yaw
                 {
-                    vector_double v_pose,v_pose2;
                     boxPose.getAsVector(v_pose);
                     CPose3D move(0,0,0,-OFFSET_ANGLES,0,0);
                     CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
@@ -643,7 +648,6 @@ int main(int argc, char* argv[])
                 case ( MRPTK_HOME ) : // pitch
                 {
                     CPose3D move(0,0,0,0,-OFFSET_ANGLES,0);
-                    vector_double v_pose,v_pose2;
                     boxPose.getAsVector(v_pose);
                     CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
                     CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
@@ -655,7 +659,6 @@ int main(int argc, char* argv[])
                 case ( MRPTK_END ) : // -pitch
                 {
                     CPose3D move(0,0,0,0,OFFSET_ANGLES,0);
-                    vector_double v_pose,v_pose2;
                     boxPose.getAsVector(v_pose);
                     CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
                     CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
@@ -667,7 +670,6 @@ int main(int argc, char* argv[])
                 case ( MRPTK_PAGEUP ) : // roll
                 {
                     CPose3D move(0,0,0,0,0,-OFFSET_ANGLES);
-                    vector_double v_pose,v_pose2;
                     boxPose.getAsVector(v_pose);
                     CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
                     CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
@@ -679,7 +681,6 @@ int main(int argc, char* argv[])
                 case ( MRPTK_PAGEDOWN ) : // -roll
                 {
                     CPose3D move(0,0,0,0,0,OFFSET_ANGLES);
-                    vector_double v_pose,v_pose2;
                     boxPose.getAsVector(v_pose);
                     CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
                     CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);

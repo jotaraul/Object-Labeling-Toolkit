@@ -19,10 +19,11 @@
  |                                                                           |
  *---------------------------------------------------------------------------*/
 
-#include <mrpt/slam/CSimplePointsMap.h>
-#include <mrpt/slam/CObservation2DRangeScan.h>
+#include <mrpt/maps/CSimplePointsMap.h>
+#include <mrpt/obs/CObservation2DRangeScan.h>
+#include <mrpt/obs/CObservation3DRangeScan.h>
 #include <mrpt/slam/CICP.h>
-#include <mrpt/slam/CRawlog.h>
+#include <mrpt/obs/CRawlog.h>
 #include <mrpt/poses/CPose2D.h>
 #include <mrpt/poses/CPosePDF.h>
 #include <mrpt/poses/CPosePDFGaussian.h>
@@ -56,11 +57,17 @@
 #include <iostream>
 #include <fstream>
 
+#include <numeric> // std::accumulate
+
 using namespace mrpt;
 using namespace mrpt::utils;
+using namespace mrpt::maps;
 using namespace mrpt::slam;
 using namespace mrpt::gui;
 using namespace mrpt::opengl;
+using namespace mrpt::poses;
+using namespace mrpt::obs;
+using namespace mrpt::system;
 using namespace std;
 using namespace mrpt::math;
 
@@ -242,23 +249,23 @@ void processPending3DRangeScans()
 
             CPose2D posPoseDif = rp2.pose - rp1.pose;
 
-            vector_double v_coords;
+            CVectorDouble v_coords;
             posPoseDif.getAsVector(v_coords);
             CPose2D intermediatePose(v_coords[0]*interpolationFactor,
                                            v_coords[1]*interpolationFactor,
                                            v_coords[2]*interpolationFactor);
 
-            vector_double v_coordsIntermediatePose;
+            CVectorDouble v_coordsIntermediatePose;
             intermediatePose.getAsVector( v_coordsIntermediatePose );
 
-            vector_double v_rp1Pose;
+            CVectorDouble v_rp1Pose;
             rp1.pose.getAsVector( v_rp1Pose );
 
             CPose2D poseToSum = rp1.pose + intermediatePose;
 
             CPose3D finalPose = poseToSum + pose;
 
-            vector_double coords;
+            CVectorDouble coords;
             finalPose.getAsVector(coords);
             //finalPose.setFromValues(coords[0],coords[1],coords[2],coords[3],coords[4]-DEG2RAD(90),coords[5]-DEG2RAD(90));
             finalPose.setFromValues(coords[0],coords[1],coords[2],coords[3],coords[4],coords[5]);
@@ -309,7 +316,7 @@ void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObser
 
     cout << "Getting points... points 1: ";
 
-    vector_double xs, ys, zs, xs2, ys2, zs2;
+    CVectorDouble xs, ys, zs, xs2, ys2, zs2;
     M1.getAllPoints(xs,ys,zs);
     M2.getAllPoints(xs2,ys2,zs2);
 
@@ -473,7 +480,7 @@ void refineLocationPCLBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<COb
 
     cout << "Getting points... points 1: ";
 
-    vector_double xs, ys, zs, xs2, ys2, zs2;
+    CVectorDouble xs, ys, zs, xs2, ys2, zs2;
     M1.getAllPoints(xs,ys,zs);
     M2.getAllPoints(xs2,ys2,zs2);
 
@@ -575,7 +582,7 @@ void refineLocationPCLBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<COb
     estimated_pose.y(transformation(1,3));
     estimated_pose.z(transformation(2,3));
 
-    vector_double v_pose;
+    CVectorDouble v_pose;
     estimated_pose.getAsVector(v_pose);
 
     cout << "Pose: " << v_pose << endl;
@@ -634,7 +641,7 @@ void refineLocation( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservat
     for ( size_t i = 0; i < v_obs2.size(); i++ )
         M2.insertObservationPtr( v_obs2[i] );
 
-    cout << M1.getPointsCount() << ", points 2: " << M2.getPointsCount() << " done" << endl;
+    cout << M1.size() << ", points 2: " << M2.size() << " done" << endl;
 
     COpenGLScenePtr scene1=COpenGLScene::Create();
     COpenGLScenePtr scene2=COpenGLScene::Create();
@@ -1051,7 +1058,7 @@ int main(int argc, char **argv)
             }
 
             cout << "Mean goodness: "
-                 << std::accumulate(v_goodness.begin(), v_goodness.end(), 0.0 ) / v_goodness.size()
+                 << accumulate(v_goodness.begin(), v_goodness.end(), 0.0 ) / v_goodness.size()
                  << endl;
 
             cout << " completed" << endl;
@@ -1079,10 +1086,10 @@ int main(int argc, char **argv)
 
         win.hold_on();
 
-        vector_double coord_x, coord_y;
+        CVectorDouble coord_x, coord_y;
         for ( size_t pos_index = 0; pos_index < v_robotPoses.size(); pos_index++ )
         {
-            vector_double v_coords;
+            CVectorDouble v_coords;
             v_robotPoses[pos_index].pose.getAsVector(v_coords);
             coord_x.push_back(v_coords[0]);
             coord_y.push_back(v_coords[1]);
@@ -1090,20 +1097,19 @@ int main(int argc, char **argv)
 
         win.plot(coord_x,coord_y,"k.5");
 
-        coord_x.clear();
-        coord_y.clear();
+        CVectorDouble coord_x2, coord_y2;
 
         for ( size_t pos_index = 0; pos_index < v_3DRangeScans.size(); pos_index++ )
         {
             CPose3D pose;
-            vector_double v_coords;
+            CVectorDouble v_coords;
             v_3DRangeScans[pos_index]->getSensorPose(pose);
             pose.getAsVector(v_coords);
-            coord_x.push_back(v_coords[0]);
-            coord_y.push_back(v_coords[1]);
+            coord_x2.push_back(v_coords[0]);
+            coord_y2.push_back(v_coords[1]);
         }
 
-        win.plot(coord_x,coord_y,"g.5");
+        win.plot(coord_x2,coord_y2,"g.5");
 
         win.waitForKey();
 
