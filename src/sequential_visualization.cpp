@@ -56,6 +56,7 @@ int main(int argc, char* argv[])
 {
 
     bool stepByStepExecution = false;
+    bool clearAfterStep = false;
 
     // Set 3D window
 
@@ -123,6 +124,11 @@ int main(int argc, char* argv[])
                     stepByStepExecution = true;
                     arg++;
                 }
+                else if ( !strcmp(argv[arg], "-clear") )
+                {
+                    clearAfterStep = true;
+                    arg++;
+                }
                 else
                 {
                     cout << "[Error] " << argv[arg] << "unknown paramter" << endl;
@@ -138,7 +144,8 @@ int main(int argc, char* argv[])
                 " \t (1) Rawlog file." << endl;
         cout << "Then, optional parameters:" << endl <<
                 " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
-                " \t -step                  : Enable step by step execution." << endl;
+                " \t -step                  : Enable step by step execution." << endl <<
+                " \t -clear                 : Clear the scene after a step." << endl;
 
         return -1;
     }
@@ -150,6 +157,8 @@ int main(int argc, char* argv[])
     sceneFile += ".scene";
     size_t N_inserted_point_clouds = 0;
 
+    vector<CRenderizablePtr> v_obsInserted;
+
     // Iterate over the obs into the rawlog and show them in the 3D/2D windows
 
     for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
@@ -159,6 +168,21 @@ int main(int argc, char* argv[])
         if ( find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel) == sensors_to_use.end() )
             continue;
 
+        if ( clearAfterStep )
+        {
+            size_t index = std::distance(sensors_to_use.begin(),
+                                     find(sensors_to_use.begin(),
+                                          sensors_to_use.end(),obs->sensorLabel));
+            if ( !index )
+            {
+                for ( size_t i = 0; i < v_obsInserted.size(); i++ )
+                    scene->removeObject( v_obsInserted[i] );
+
+                v_obsInserted.clear();
+            }
+
+        }
+
         CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
         obs3D->load();
 
@@ -166,6 +190,8 @@ int main(int argc, char* argv[])
         obs3D->intensityImage.getAsMatrix(mat);
 
         cout << mat;*/
+
+        //scene->removeObject()
 
         CPose3D pose;
         obs3D->getSensorPose( pose );
@@ -175,13 +201,13 @@ int main(int argc, char* argv[])
         pose.getAsVector( coords );
         x.push_back( coords[0] );
         y.push_back( coords[1] );
-        CPoint2D point((double)coords[0], (double)coords[1]);
+        CPoint3D point((double)coords[0], (double)coords[1], (double)coords[2]);
         win.plot(x,y,"b.4");
 
         mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
 
         mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
-        gl_points->setPointSize(6);
+        gl_points->setPointSize(3);
 
         CColouredPointsMap colouredMap;
         colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
@@ -198,7 +224,10 @@ int main(int argc, char* argv[])
                 gl_points->setPoint_fast(i,0,0,0);
 
         scene->insert( gl_points );
-        //scene->insert( sphere );
+        scene->insert( sphere );
+
+        if ( clearAfterStep )
+            v_obsInserted.push_back( gl_points );
 
         N_inserted_point_clouds++;
 

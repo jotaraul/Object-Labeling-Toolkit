@@ -49,10 +49,13 @@ using namespace mrpt::obs;
 //mrpt::gui::CDisplayWindow3D  win3D;
 
 CPose3D hokuyoPose, RGBD_1Pose, RGBD_2Pose, RGBD_3Pose, RGBD_4Pose;
+bool useDefaultIntrinsics;
 
 void loadConfig( const string configFileName )
 {
     CConfigFile config( configFileName );
+
+    useDefaultIntrinsics = config.read_bool("GENERAL","use_default_intrinsics","",true);
 
     double x, y, z, yaw, pitch, roll;
 
@@ -137,8 +140,6 @@ int main(int argc, char* argv[])
         string RGBD_sensor4 = "RGBD_4";
         bool onlyHokuyo = false;
 
-        const double Z_OFFSET = 1.015;
-
         string i_rawlogFilename;
         string o_rawlogFileName;
 
@@ -179,6 +180,13 @@ int main(int argc, char* argv[])
 
         cout << "[INFO] Working with " << i_rawlogFilename << endl;
 
+        TCamera defaultCameraParamsDepth;
+        defaultCameraParamsDepth.nrows = 488;
+        defaultCameraParamsDepth.scaleToResolution(320,244);
+
+        TCamera defaultCameraParamsInt;
+        defaultCameraParamsInt.scaleToResolution(320,240);
+
         for ( size_t obsIndex = 0; obsIndex < i_rawlog.size(); obsIndex++ )
         {
             cout << "Processing " << obsIndex << " of " << i_rawlog.size() << '\xd';
@@ -203,8 +211,16 @@ int main(int argc, char* argv[])
 
                 obs3D->setSensorPose(RGBD_1Pose);
 
-                obs3D->cameraParams.scaleToResolution(320,244);
-                obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                if ( useDefaultIntrinsics )
+                {
+                    obs3D->cameraParams = defaultCameraParamsDepth;
+                    obs3D->cameraParamsIntensity = defaultCameraParamsInt;
+                }
+                else
+                {
+                    obs3D->cameraParams.scaleToResolution(320,244);
+                    obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                }
 
                 obs3D->project3DPointsFromDepthImage();
 
@@ -216,7 +232,6 @@ int main(int argc, char* argv[])
 
                 mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
                 gl_points->setPointSize(4.5);
-
                 mrpt::slam::CColouredPointsMap colouredMap;
                 colouredMap.insertObservation( obs3D.pointer() );
 
@@ -235,8 +250,16 @@ int main(int argc, char* argv[])
 
                 obs3D->setSensorPose(RGBD_2Pose);
 
-                obs3D->cameraParams.scaleToResolution(320,244);
-                obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                if ( useDefaultIntrinsics )
+                {
+                    obs3D->cameraParams = defaultCameraParamsDepth;
+                    obs3D->cameraParamsIntensity = defaultCameraParamsInt;
+                }
+                else
+                {
+                    obs3D->cameraParams.scaleToResolution(320,244);
+                    obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                }
 
                 obs3D->project3DPointsFromDepthImage();
 
@@ -250,8 +273,16 @@ int main(int argc, char* argv[])
 
                 obs3D->setSensorPose(RGBD_3Pose);
 
-                obs3D->cameraParams.scaleToResolution(320,244);
-                obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                if ( useDefaultIntrinsics )
+                {
+                    obs3D->cameraParams = defaultCameraParamsDepth;
+                    obs3D->cameraParamsIntensity = defaultCameraParamsInt;
+                }
+                else
+                {
+                    obs3D->cameraParams.scaleToResolution(320,244);
+                    obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                }
 
                 obs3D->project3DPointsFromDepthImage();
 
@@ -265,8 +296,16 @@ int main(int argc, char* argv[])
 
                 obs3D->setSensorPose(RGBD_4Pose);
 
-                obs3D->cameraParams.scaleToResolution(320,244);
-                obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                if ( useDefaultIntrinsics )
+                {
+                    obs3D->cameraParams = defaultCameraParamsDepth;
+                    obs3D->cameraParamsIntensity = defaultCameraParamsInt;
+                }
+                else
+                {
+                    obs3D->cameraParams.scaleToResolution(320,244);
+                    obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                }
 
                 obs3D->project3DPointsFromDepthImage();
 

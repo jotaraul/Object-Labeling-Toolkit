@@ -99,3 +99,6 @@ TARGET_LINK_LIBRARIES(Label_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
 ADD_EXECUTABLE(Segmentation ${CMAKE_SOURCE_DIR}/src/segmentation.cpp)
 TARGET_LINK_LIBRARIES(Segmentation ${PCL_LIBRARIES} ${MRPT_LIBS} )
+
+ADD_EXECUTABLE(Create_video ${CMAKE_SOURCE_DIR}/src/create_video.cpp)
+TARGET_LINK_LIBRARIES(Create_video ${PCL_LIBRARIES} ${MRPT_LIBS} )

@@ -33,7 +33,7 @@
 #include <mrpt/obs/CRawlog.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/opengl.h>
-#include <mrpt/maps.h>
+//#include <mrpt/maps.h>
 #include <mrpt/utils/CConfigFile.h>
 
 #include <pcl/point_types.h>

@@ -31,6 +31,7 @@
 #include <mrpt/math/utils.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/utils/CTicTac.h>
+#include <mrpt/maps/PCL_adapters.h>
 
 #include <mrpt/slam/CICP.h>
 
@@ -52,7 +53,8 @@
 #include <pcl/registration/gicp.h>
 #include <pcl/registration/warp_point_rigid_3d.h>
 
-#include <pcl/filters/voxel_grid.h>
+//#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/fast_bilateral.h>
 
 #include <iostream>
 #include <fstream>
@@ -80,13 +82,17 @@ using namespace pcl;
 bool initialGuessICP2D  = true;
 bool refineWithICP3D    = false;
 bool accumulatePast     = false;
+bool smooth3DObs        = true;
+bool visualize2DResults = true;
 string ICP3D_method;
 
 CPose3D lastGoodICP3Dpose;
 bool oneGoodICP3DPose = false;
 
 bool skip_window=false;
-int  ICP_method = (int) icpClassic;
+//int  ICP_method = (int) icpClassic;
+int  ICP_method = (int) icpLevenbergMarquardt;
+
 CPose2D		initialPose(0.8f,0.0f,(float)DEG2RAD(0.0f));
 gui::CDisplayWindowPlots	win("ICP results");
 
@@ -104,6 +110,7 @@ struct TRobotPose
 {
     TTimeStamp  time;
     CPose2D     pose;
+    double      goodness;
 };
 
 vector< TRobotPose > v_robotPoses;
@@ -116,7 +123,8 @@ vector< double > v_goodness;
 //                      trajectoryICP2D
 //-----------------------------------------------------------
 
-void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog, CObservation2DRangeScanPtr obs2D )
+void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog,
+                      CObservation2DRangeScanPtr obs2D, double &goodness )
 {
     CSimplePointsMap		m1,m2;
     float					runningTime;
@@ -130,32 +138,34 @@ void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog, CObservation2DRang
     //cout << "M2 size: " << m2.size();
 
     // -----------------------------------------------------
-//	ICP.options.ICP_algorithm = icpLevenbergMarquardt;
-//	ICP.options.ICP_algorithm = icpClassic;
+    //	ICP.options.ICP_algorithm = icpLevenbergMarquardt;
+    //	ICP.options.ICP_algorithm = icpClassic;
     ICP.options.ICP_algorithm = (TICPAlgorithm)ICP_method;
 
-    ICP.options.maxIterations			= 100;
+    ICP.options.maxIterations			= 800;
     ICP.options.thresholdAng			= DEG2RAD(10.0f);
     ICP.options.thresholdDist			= 0.75f;
-    ICP.options.ALFA					= 0.5f;
+    ICP.options.ALFA					= 0.99f;
     ICP.options.smallestThresholdDist	= 0.05f;
     ICP.options.doRANSAC = false;
 
-//    ICP.options.dumpToConsole();
+    //    ICP.options.dumpToConsole();
     // -----------------------------------------------------
 
     CPosePDFPtr pdf = ICP.Align(
-        &m1,
-        &m2,
-        initialPose,
-        &runningTime,
-        (void*)&info);
+                &m1,
+                &m2,
+                initialPose,
+                &runningTime,
+                (void*)&info);
 
     printf("ICP run in %.02fms, %d iterations (%.02fms/iter), %.01f%% goodness\n -> ",
-            runningTime*1000,
-            info.nIterations,
-            runningTime*1000.0f/info.nIterations,
-            info.goodness*100 );
+           runningTime*1000,
+           info.nIterations,
+           runningTime*1000.0f/info.nIterations,
+           info.goodness*100 );
+
+    goodness = info.goodness*100;
 
     cout << "Mean of estimation: " << pdf->getMeanVal() << endl<< endl;
     initialPose = pdf->getMeanVal();
@@ -163,22 +173,22 @@ void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog, CObservation2DRang
     CPosePDFGaussian  gPdf;
     gPdf.copyFrom(*pdf);
 
-//    cout << "Covariance of estimation: " << endl << gPdf.cov << endl;
+    //    cout << "Covariance of estimation: " << endl << gPdf.cov << endl;
 
-//    cout << " std(x): " << sqrt( gPdf.cov(0,0) ) << endl;
-//    cout << " std(y): " << sqrt( gPdf.cov(1,1) ) << endl;
-//    cout << " std(phi): " << RAD2DEG(sqrt( gPdf.cov(2,2) )) << " (deg)" << endl;
+    //    cout << " std(x): " << sqrt( gPdf.cov(0,0) ) << endl;
+    //    cout << " std(y): " << sqrt( gPdf.cov(1,1) ) << endl;
+    //    cout << " std(phi): " << RAD2DEG(sqrt( gPdf.cov(2,2) )) << " (deg)" << endl;
 
-//    cout << "-> Saving reference map as scan1.txt" << endl;
-//    m1.save2D_to_text_file("scan1.txt");
+    //    cout << "-> Saving reference map as scan1.txt" << endl;
+    //    m1.save2D_to_text_file("scan1.txt");
 
-//    cout << "-> Saving map to align as scan2.txt" << endl;
-//    m2.save2D_to_text_file("scan2.txt");
+    //    cout << "-> Saving map to align as scan2.txt" << endl;
+    //    m2.save2D_to_text_file("scan2.txt");
 
-//    cout << "-> Saving transformed map to align as scan2_trans.txt" << endl;
+    //    cout << "-> Saving transformed map to align as scan2_trans.txt" << endl;
     CSimplePointsMap m2_trans = m2;
     m2_trans.changeCoordinatesReference( gPdf.mean );
-//    m2_trans.save2D_to_text_file("scan2_trans.txt");
+    //    m2_trans.save2D_to_text_file("scan2_trans.txt");
 
 
     trajectoryFile << initialPose << endl;
@@ -252,8 +262,8 @@ void processPending3DRangeScans()
             CVectorDouble v_coords;
             posPoseDif.getAsVector(v_coords);
             CPose2D intermediatePose(v_coords[0]*interpolationFactor,
-                                           v_coords[1]*interpolationFactor,
-                                           v_coords[2]*interpolationFactor);
+                                     v_coords[1]*interpolationFactor,
+                                     v_coords[2]*interpolationFactor);
 
             CVectorDouble v_coordsIntermediatePose;
             intermediatePose.getAsVector( v_coordsIntermediatePose );
@@ -332,42 +342,12 @@ void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObser
     cloud_new->clear();
     cloud_trans->clear();
 
-    for ( size_t i = 0; i < xs.size(); i+= ( ( accumulatePast ) ? 1 : 4) )
-    {
-        PointXYZ point(xs[i],ys[i],zs[i]);
+    for ( size_t i = 0; i < xs.size(); i+= ( ( accumulatePast ) ? 1 : 1) )
+        cloud_old->push_back(PointXYZ(xs[i],ys[i],zs[i]));
 
-        //if ( point.x && point.y && point.z )
-            cloud_old->push_back(point);
-    }
+    for ( size_t i = 0; i < xs2.size(); i+= ( ( accumulatePast ) ? 1 : 1) )
+        cloud_new->push_back(PointXYZ(xs2[i],ys2[i],zs2[i]));
 
-    for ( size_t i = 0; i < xs2.size(); i+= ( ( accumulatePast ) ? 1 : 4) )
-    {
-        PointXYZ point(xs2[i],ys2[i],zs2[i]);
-
-        //if ( point.x && point.y && point.z )
-            cloud_new->push_back(point);
-    }
-
-    if ( true )
-    {
-        // Create the filtering object
-        pcl::VoxelGrid<pcl::PointXYZ> sor;
-        sor.setInputCloud (cloud_old);
-        sor.setLeafSize (0.05,
-                         0.05,
-                         0.05);
-        sor.filter (*cloud_old);
-    }
-
-    /*for ( size_t i = 0; i < xs.size(); i+=4 )
-            cloud_old->push_back(PointXYZ(xs[i],ys[i],0));
-
-        for ( size_t i = 0; i < xs2.size(); i+=4 )
-            cloud_new->push_back(PointXYZ(xs2[i],ys2[i],0));*/
-
-    //cout << "done" << endl;
-
-    // Esa para GICP, si quieres el normal solo le tienes que quitar lo de Generalized
     GeneralizedIterativeClosestPoint<PointXYZ, PointXYZ> gicp;
 
     //cout << "Setting input clouds...";
@@ -398,15 +378,12 @@ void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObser
 
     v_goodness.push_back(score);
 
-    cout << "Done! Average error: " << sqrt(score) << " meters" << endl;
+    cout << " done! Average error: " << sqrt(score) << " meters" << endl;
 
     // Obtain the transformation that aligned cloud_source to cloud_source_registered
     Eigen::Matrix4f transformation = gicp.getFinalTransformation();
 
     CPose3D estimated_pose;
-
-    //cout << "Transformation" << endl;
-    //cout << transformation << endl;
 
     CMatrixDouble33 rot_matrix;
         for (unsigned int i=0; i<3; i++)
@@ -417,8 +394,6 @@ void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObser
     estimated_pose.x(transformation(0,3));
     estimated_pose.y(transformation(1,3));
     estimated_pose.z(transformation(2,3));
-
-    //cout << "Pose set done" << endl;
 
     for ( size_t i = 0; i < v_obs2.size(); i++ )
     {
@@ -573,9 +548,9 @@ void refineLocationPCLBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<COb
     //cout << transformation << endl;
 
     CMatrixDouble33 rot_matrix;
-        for (unsigned int i=0; i<3; i++)
-            for (unsigned int j=0; j<3; j++)
-                rot_matrix(i,j) = transformation(i,j);
+    for (unsigned int i=0; i<3; i++)
+        for (unsigned int j=0; j<3; j++)
+            rot_matrix(i,j) = transformation(i,j);
 
     estimated_pose.setRotationMatrix(rot_matrix);
     estimated_pose.x(transformation(0,3));
@@ -754,6 +729,24 @@ void refineLocation( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservat
 }
 
 //-----------------------------------------------------------
+//                    applyBilateralFilter
+//-----------------------------------------------------------
+
+void applyBilateralFilter( pcl::PointCloud<pcl::PointXYZ>::Ptr cloud )
+{
+
+    pcl::FastBilateralFilter<pcl::PointXYZ> m_bilateralFilter;
+
+    m_bilateralFilter.setInputCloud (cloud);
+
+    m_bilateralFilter.setSigmaS (10);
+    m_bilateralFilter.setSigmaR (0.05);
+    //m_bilateralFilter.setEarlyDivision (m_bilateralFilterConf.earlyDivision);
+
+    m_bilateralFilter.filter (*cloud);
+}
+
+//-----------------------------------------------------------
 //                          main
 //-----------------------------------------------------------
 
@@ -764,9 +757,9 @@ int main(int argc, char **argv)
         string simpleMapFile;
         CRawlog i_rawlog, o_rawlog;
         CTicTac clock;
-        double time_icp2D = 0, time_icp3D = 0;
+        double time_icp2D = 0, time_icp3D = 0, time_smoothing = 0;
 
-        string rawlogFilename;
+        string i_rawlogFile;
         string o_rawlogFile;
 
         //
@@ -775,10 +768,10 @@ int main(int argc, char **argv)
 
         if ( argc >= 3 )
         {
-            rawlogFilename = argv[1];
+            i_rawlogFile = argv[1];
             simpleMapFile = argv[2];
 
-            o_rawlogFile = rawlogFilename.substr(0,rawlogFilename.size()-7);
+            o_rawlogFile = i_rawlogFile.substr(0,i_rawlogFile.size()-7);
 
             for ( size_t arg = 3; arg < argc; arg++ )
             {
@@ -839,10 +832,10 @@ int main(int argc, char **argv)
         o_rawlogFile += ".rawlog";
 
 
-        if (!i_rawlog.loadFromRawLogFile(rawlogFilename))
+        if (!i_rawlog.loadFromRawLogFile(i_rawlogFile))
             throw std::runtime_error("Couldn't open rawlog dataset file for input...");
 
-        cout << "Working with " << rawlogFilename << endl;
+        cout << "Working with " << i_rawlogFile << endl;
 
         // Create the reference objects:
 
@@ -861,6 +854,16 @@ int main(int argc, char **argv)
                 window3.setPos(10,520);
             }
         }
+        else
+        {
+            window.setPos(-500,-500);
+            window2.setPos(-500,-500);
+            window3.setPos(-500,-500);
+        }
+
+        //
+        // Compute initial guess from ICP2D
+        //
 
         if ( initialGuessICP2D )
         {
@@ -874,14 +877,17 @@ int main(int argc, char **argv)
                 {
                     CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
                     obs2D->load();
+                    double goodness;
 
-                    trajectoryICP2D(simpleMapFile,i_rawlog,obs2D);
+                    trajectoryICP2D(simpleMapFile,i_rawlog,obs2D,goodness);
 
                     TRobotPose robotPose;
                     robotPose.pose = initialPose;
                     robotPose.time = obs2D->timestamp;
+                    robotPose.goodness = goodness;
 
-                    v_robotPoses.push_back( robotPose );
+                    if ( goodness > 50 )
+                        v_robotPoses.push_back( robotPose );
 
                     // Process pending 3D range scans, if any
                     if ( !v_pending3DRangeScans.empty() )
@@ -922,7 +928,44 @@ int main(int argc, char **argv)
             }
         }
 
-        //win.waitForKey();
+        //
+        // Smooth3DObs?
+        //
+
+        if ( smooth3DObs )
+        {
+            cout << "[INFO] Smoothing point clouds... ";
+
+            clock.Tic();
+
+            Eigen::Matrix4f transMat;
+
+            transMat(0,0)=0;    transMat(0,1)=-1;     transMat(0,2)=0;    transMat(0,3)=0;
+            transMat(1,0)=0;    transMat(1,1)=0;      transMat(1,2)=+1;   transMat(1,3)=0;
+            transMat(2,0)=1;    transMat(2,1)=0;      transMat(2,2)=0;    transMat(2,3)=0;
+            transMat(3,0)=0;    transMat(3,1)=0;      transMat(3,2)=0;    transMat(3,3)=1;
+
+            for ( size_t i = 0; i < v_3DRangeScans.size(); i++ )
+            {
+                CObservation3DRangeScanPtr obs3D = CObservation3DRangeScan::Create();
+                obs3D = v_3DRangeScans[i];
+
+                pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+                obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
+
+                pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
+
+                pcl_cloud->height = 240;
+                pcl_cloud->width = 320;
+
+                applyBilateralFilter(pcl_cloud);
+
+            }
+
+            time_smoothing = clock.Tac();
+
+            cout << " done." << endl;
+        }
 
         //
         // Refine using ICP3D
@@ -962,7 +1005,7 @@ int main(int argc, char **argv)
             refineLocationPCLBis( v_allObs[0], v_allObs[2] );
             refineLocationPCLBis( v_allObs[0], v_allObs[3] );*/
 
-            cout << "[INFO] Refining sensor poses using ICP3D..." << endl;
+            cout << "[INFO] Refining sensor poses using (G)ICP3D" << endl;
 
             vector<CObservation3DRangeScanPtr> v_obs;  // Past set of obs
             vector<CObservation3DRangeScanPtr> v_obs2(4); // Current set of obs
@@ -971,13 +1014,15 @@ int main(int argc, char **argv)
             bool first = true;
             size_t set_index = 0;
 
+            CTicTac clockEllapsedICP3D;
+            clockEllapsedICP3D.Tic();
+
             for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
             {
-                CTicTac clock;
-                clock.Tic();
+                CTicTac clockLoop;
+                clockLoop.Tic();
 
                 CObservation3DRangeScanPtr obs = v_3DRangeScans[obsIndex];
-                //cout << obs->sensorLabel << endl;
 
                 if ( obs->sensorLabel == "RGBD_1" )
                 {
@@ -1032,7 +1077,7 @@ int main(int argc, char **argv)
                             refineLocationPCL( v_obs, v3  );
                             refineLocationPCL( v_obs, v4  );
                         }
-                        else
+                        else                        
                             refineLocationPCL( v_obs, v_obs2 );
                     }
                     else
@@ -1053,30 +1098,33 @@ int main(int argc, char **argv)
                     else
                         v_obs = v_obs2;
 
-                    cout << "Time ellapsed: " << clock.Tac() << "s" << endl;
-                }                
+                    cout << "Time ellapsed      : " << size_t(clockLoop.Tac()/60) << " min. (" <<
+                            clockLoop.Tac() << "s.)." << endl;
+                }
+                    cout << "Total time ellapsed: " << size_t(clockEllapsedICP3D.Tac()/60) << " min. (" <<
+                            clockEllapsedICP3D.Tac() << "s.)." << endl;
             }
 
             cout << "Mean goodness: "
-                 << accumulate(v_goodness.begin(), v_goodness.end(), 0.0 ) / v_goodness.size()
+                 << std::accumulate(v_goodness.begin(), v_goodness.end(), 0.0 ) / v_goodness.size()
                  << endl;
 
-            cout << " completed" << endl;
+            cout << " done." << endl;
 
             time_icp3D = clock.Tac();
 
         }
 
         cout << "[INFO] time spent by the icp2D process: " << time_icp2D << " sec." << endl;
-        cout << "[INFO] time spent by the icp3D process: " << time_icp3D << " sec." << endl;
+        cout << "[INFO] time spent smoothing           : " << time_smoothing << " sec." << endl;
+        cout << "[INFO] time spent by the icp3D process: " << size_t(time_icp3D/60) << " min. (" << time_icp3D << " sec.)" << endl;
 
         cout << "[INFO] Saving obs to rawlog file " << o_rawlogFile << " ...";
 
         for ( size_t obs_index = 0; obs_index < v_3DRangeScans.size(); obs_index++ )
         {
             CSensoryFrame SF;
-            SF.insert( v_3DRangeScans[obs_index] );
-            //o_rawlog.addObservations( SF );
+            SF.insert( v_3DRangeScans[obs_index] );            
             o_rawlog.addObservationMemoryReference( v_3DRangeScans[obs_index] );
         }
 
@@ -1084,40 +1132,50 @@ int main(int argc, char **argv)
 
         cout << " completed." << endl;
 
-        win.hold_on();
+        //
+        // Visualize 2D results
+        //
 
-        CVectorDouble coord_x, coord_y;
-        for ( size_t pos_index = 0; pos_index < v_robotPoses.size(); pos_index++ )
+        if ( visualize2DResults )
         {
-            CVectorDouble v_coords;
-            v_robotPoses[pos_index].pose.getAsVector(v_coords);
-            coord_x.push_back(v_coords[0]);
-            coord_y.push_back(v_coords[1]);
+
+            win.hold_on();
+
+            CVectorDouble coord_x, coord_y;
+            for ( size_t pos_index = 0; pos_index < v_robotPoses.size(); pos_index++ )
+            {
+                CVectorDouble v_coords;
+                v_robotPoses[pos_index].pose.getAsVector(v_coords);
+                coord_x.push_back(v_coords[0]);
+                coord_y.push_back(v_coords[1]);
+            }
+
+            win.plot(coord_x,coord_y,"-m.3");
+            win.plot(coord_x,coord_y,"k.9");
+
+            CVectorDouble coord_x2, coord_y2;
+
+            for ( size_t pos_index = 0; pos_index < v_3DRangeScans.size(); pos_index++ )
+            {
+                CPose3D pose;
+                CVectorDouble v_coords;
+                v_3DRangeScans[pos_index]->getSensorPose(pose);
+                pose.getAsVector(v_coords);
+                coord_x2.push_back(v_coords[0]);
+                coord_y2.push_back(v_coords[1]);
+            }
+
+            win.plot(coord_x2,coord_y2,"g.5");
+
+            win.waitForKey();
+
         }
-
-        win.plot(coord_x,coord_y,"k.5");
-
-        CVectorDouble coord_x2, coord_y2;
-
-        for ( size_t pos_index = 0; pos_index < v_3DRangeScans.size(); pos_index++ )
-        {
-            CPose3D pose;
-            CVectorDouble v_coords;
-            v_3DRangeScans[pos_index]->getSensorPose(pose);
-            pose.getAsVector(v_coords);
-            coord_x2.push_back(v_coords[0]);
-            coord_y2.push_back(v_coords[1]);
-        }
-
-        win.plot(coord_x2,coord_y2,"g.5");
-
-        win.waitForKey();
 
         return 0;
 
     } catch (exception &e)
     {
-        cout << "MRPT exception caught: " << e.what() << endl;
+        cout << "HOMe exception caught: " << e.what() << endl;
         return -1;
     }
     catch (...)
