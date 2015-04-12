@@ -323,7 +323,7 @@ void  loadLabelledScene()
 
 
 //-----------------------------------------------------------
-//                    loadLabelledScene
+//                    poseDifferentEnough
 //-----------------------------------------------------------
 
 bool poseDifferentEnough( CPose3D &pose, size_t sensor_index)
@@ -353,7 +353,7 @@ bool poseDifferentEnough( CPose3D &pose, size_t sensor_index)
 
     if ( dist > 0.2 )
         return true;
-    else if ( angle > RAD2DEG((float)10) )
+    else if ( angle > DEG2RAD((float)10) )
         return true;
     else
         return false;

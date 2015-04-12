@@ -82,6 +82,7 @@ using namespace pcl;
 bool initialGuessICP2D  = true;
 bool refineWithICP3D    = false;
 bool accumulatePast     = false;
+bool useKeyPoses        = false;
 bool smooth3DObs        = false;
 bool visualize2DResults = true;
 string ICP3D_method;
@@ -109,6 +110,9 @@ const size_t HOW_MANY_PITCHS=360;
 const size_t SECS_PER_MIN = 60;
 const size_t SECS_PER_HOUR = 3600;
 
+const double KEY_POSE_DIST_THRESHOLD = 0.3;
+const double KEY_POSE_ANGLE_THRESHOLD = DEG2RAD((float)20);
+
 struct TRobotPose
 {
     TTimeStamp  time;
@@ -121,6 +125,33 @@ vector< CObservation3DRangeScanPtr > v_3DRangeScans;
 vector< CObservation3DRangeScanPtr > v_pending3DRangeScans;
 vector< double > v_goodness;
 
+//-----------------------------------------------------------
+//                      isKeyPose
+//-----------------------------------------------------------
+
+bool isKeyPose( CPose3D &pose, CPose3D &lastPose)
+{
+    CVectorDouble pose_v;
+    pose.getAsVector( pose_v );
+
+    CVectorDouble lastPose_v;
+    lastPose.getAsVector( lastPose_v );
+
+//    cout << "Last pose    : " << lastPose << endl;
+//    cout << "Current pose : " << pose << endl;
+
+    float dist = sqrt(pow(pose_v[0]-lastPose_v[0],2) +
+                      pow(pose_v[1]-lastPose_v[1],2) ); // x-y distance
+    float angle = abs( pose_v[3]-lastPose_v[3] ); // Diff in yaw
+
+//    cout << "Distance: " << dist << " and angle: " << RAD2DEG(angle) << endl;
+
+    if ( ( dist > KEY_POSE_DIST_THRESHOLD )
+         || ( angle > KEY_POSE_ANGLE_THRESHOLD ) )
+        return true;
+    else
+        return false;
+}
 
 //-----------------------------------------------------------
 //                      trajectoryICP2D
@@ -806,6 +837,11 @@ int main(int argc, char **argv)
                     accumulatePast   = true;
                     cout << "[INFO] Enabled (G)ICP3D memory."  << endl;
                 }
+                else if ( !strcmp(argv[arg], "-enable_keyPoses") )
+                {
+                    useKeyPoses   = true;
+                    cout << "[INFO] Enabled key poses."  << endl;
+                }
                 else if ( !strcmp(argv[arg], "-enable_smoothing") )
                 {
                     smooth3DObs  = true;
@@ -829,7 +865,8 @@ int main(int argc, char **argv)
                     " \t -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
                     " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
                     " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
-                    " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl;
+                    " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
+                    " \t -enable_keyPoses : Enable the use of key poses only." << endl;
 
             return 0;
         }
@@ -853,7 +890,7 @@ int main(int argc, char **argv)
         if (!i_rawlog.loadFromRawLogFile(i_rawlogFile))
             throw std::runtime_error("Couldn't open rawlog dataset file for input...");
 
-        cout << "Working with " << i_rawlogFile << endl;
+        cout << "[INFO] Working with " << i_rawlogFile << endl;
 
         // Create the reference objects:
 
@@ -977,7 +1014,7 @@ int main(int argc, char **argv)
                 pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
                 obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
 
-                //pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
+                pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
 
                 pcl_cloud->height = 240;
                 pcl_cloud->width = 320;
@@ -997,9 +1034,9 @@ int main(int argc, char **argv)
                       point_index < N_points;
                       point_index++ )
                 {
-                    obs3D->points3D_x[point_index] = pcl_cloud->points[point_index].x;
-                    obs3D->points3D_y[point_index] = pcl_cloud->points[point_index].y;
-                    obs3D->points3D_z[point_index] = pcl_cloud->points[point_index].z;
+                    obs3D->points3D_x[point_index] = pcl_cloud->points[point_index].z;
+                    obs3D->points3D_y[point_index] = -pcl_cloud->points[point_index].x;
+                    obs3D->points3D_z[point_index] = pcl_cloud->points[point_index].y;
                 }
             }
 
@@ -1052,6 +1089,8 @@ int main(int argc, char **argv)
 
             vector<CObservation3DRangeScanPtr> v_obs;  // Past set of obs
             vector<CObservation3DRangeScanPtr> v_obs2(4); // Current set of obs
+            vector<size_t> v_obs2_indices(4);            // Indices in v_3DRangeScans vector of the current set of obs
+            vector<size_t> v_obsToDelete; // If using key poses, not key obs to delete
             vector<bool> v_obs_loaded(4,false);
 
             bool first = true;
@@ -1069,23 +1108,27 @@ int main(int argc, char **argv)
 
                 if ( obs->sensorLabel == "RGBD_1" )
                 {
-                    v_obs2[0] = obs;
+                    v_obs2[0]       = obs;
                     v_obs_loaded[0] = true;
+                    v_obs2_indices[0] = obsIndex;
                 }
                 else if ( obs->sensorLabel == "RGBD_2" )
                 {
-                    v_obs2[1] = obs;
+                    v_obs2[1]       = obs;
                     v_obs_loaded[1] = true;
+                    v_obs2_indices[1] = obsIndex;
                 }
                 else if ( obs->sensorLabel == "RGBD_3" )
                 {
-                    v_obs2[2] = obs;
+                    v_obs2[2]       = obs;
                     v_obs_loaded[2] = true;
+                    v_obs2_indices[2] = obsIndex;
                 }
                 else if ( obs->sensorLabel == "RGBD_4" )
                 {
-                    v_obs2[3] = obs;
+                    v_obs2[3]       = obs;
                     v_obs_loaded[3] = true;
+                    v_obs2_indices[3] = obsIndex;
                 }
 
                 double sum;
@@ -1097,14 +1140,55 @@ int main(int argc, char **argv)
                     v_obs_loaded.clear();
                     v_obs_loaded.resize(4,false);
 
+                    cout << "Working set of obs index... " << set_index++ << " of approx. " << (double)N_scans/4 << endl;
+
                     if ( first )
                     {
                         v_obs = v_obs2;
                         first = false;
                         continue;
                     }
+                    else
+                    {
+                        // Check if it's a key pose
+                        if ( useKeyPoses )
+                        {
+                            bool keyPose = true;
 
-                    cout << "Working set of obs index... " << set_index++ << " of approx. " << (double)N_scans/4 << endl;
+                            CPose3D pose1,pose2,pose3,pose4;
+                            CPose3D pose2_1,pose2_2,pose2_3,pose2_4;
+
+                            size_t N_prevObs = v_obs.size();
+
+                            v_obs[N_prevObs-4]->getSensorPose(pose1);
+                            v_obs[N_prevObs-3]->getSensorPose(pose2);
+                            v_obs[N_prevObs-2]->getSensorPose(pose3);
+                            v_obs[N_prevObs-1]->getSensorPose(pose4);
+
+                            v_obs2[0]->getSensorPose(pose2_1); v_obs2[1]->getSensorPose(pose2_2);
+                            v_obs2[2]->getSensorPose(pose2_3); v_obs2[3]->getSensorPose(pose2_4);
+
+                            keyPose = keyPose && isKeyPose(pose2_1,pose1);
+                            keyPose = keyPose && isKeyPose(pose2_2,pose2);
+                            keyPose = keyPose && isKeyPose(pose2_3,pose3);
+                            keyPose = keyPose && isKeyPose(pose2_4,pose4);
+
+                            if (!keyPose)
+                            {
+//                                cout << "Delete: " << v_obs2_indices[0] << " " << v_obs2_indices[1] << " " <<
+//                                        v_obs2_indices[2] << " " << v_obs2_indices[3] << endl;
+
+                                cout << "Not a key pose, moving to the next one." << endl;
+                                cout << "---------------------------------------------------" << endl;
+
+                                v_obsToDelete.push_back(v_obs2_indices[0]);
+                                v_obsToDelete.push_back(v_obs2_indices[1]);
+                                v_obsToDelete.push_back(v_obs2_indices[2]);
+                                v_obsToDelete.push_back(v_obs2_indices[3]);
+                                continue;
+                            }
+                        }
+                    }
 
                     vector<CObservation3DRangeScanPtr>  v1(1,v_obs2[0]);
                     vector<CObservation3DRangeScanPtr>  v2(1,v_obs2[1]);
@@ -1120,10 +1204,10 @@ int main(int argc, char **argv)
                             refineLocationGICP3D( v_obs, v3  );
                             refineLocationGICP3D( v_obs, v4  );
                         }
-                        else                        
+                        else
                             refineLocationGICP3D( v_obs, v_obs2 );
                     }
-                    else
+                    else // ICP3D
                     {
                         if ( accumulatePast )
                         {
@@ -1135,6 +1219,18 @@ int main(int argc, char **argv)
                         else
                             refineLocationICP3D( v_obs, v_obs2 );
                     }
+
+//                    CPose3D pose1, pose2,pose3,pose4;
+
+//                    v_obs2[0]->getSensorPose(pose1);
+//                    v_obs2[1]->getSensorPose(pose2);
+//                    v_obs2[2]->getSensorPose(pose3);
+//                    v_obs2[3]->getSensorPose(pose4);
+
+//                    cout << "Pose 1 results: " << pose1 << endl;
+//                    cout << "Pose 2 results: " << pose2 << endl;
+//                    cout << "Pose 3 results: " << pose3 << endl;
+//                    cout << "Pose 4 results: " << pose4 << endl;
 
                     if ( accumulatePast )
                         v_obs.insert(v_obs.end(), v_obs2.begin(), v_obs2.end() );
@@ -1153,6 +1249,25 @@ int main(int argc, char **argv)
 
                     cout << "---------------------------------------------------" << endl;
                 }                    
+            }
+
+            // Delete not key poses
+
+            if ( useKeyPoses )
+            {
+                cout << "Vector of 3D obs reduced from " << v_3DRangeScans.size();
+
+                for ( size_t obsIndex = N_scans; obsIndex > 0; obsIndex-- )
+                {
+                    vector<size_t>::iterator it = find(v_obsToDelete.begin(),
+                                                       v_obsToDelete.end(), obsIndex);
+                    if ( it != v_obsToDelete.end())
+                    {
+                        v_3DRangeScans.erase(v_3DRangeScans.begin() + obsIndex);
+                    }
+                }
+
+                cout << " to " << v_3DRangeScans.size() << endl;
             }
 
             cout << "Mean goodness: "
