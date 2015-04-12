@@ -82,7 +82,7 @@ using namespace pcl;
 bool initialGuessICP2D  = true;
 bool refineWithICP3D    = false;
 bool accumulatePast     = false;
-bool smooth3DObs        = true;
+bool smooth3DObs        = false;
 bool visualize2DResults = true;
 string ICP3D_method;
 
@@ -105,6 +105,9 @@ CDisplayWindow3D window3("ICP-3D demo: ICP-ALIGNED scans",500,500);
 //Increase this values to get more precision. It will also increase run time.
 const size_t HOW_MANY_YAWS=360;
 const size_t HOW_MANY_PITCHS=360;
+
+const size_t SECS_PER_MIN = 60;
+const size_t SECS_PER_HOUR = 3600;
 
 struct TRobotPose
 {
@@ -303,7 +306,7 @@ void processPending3DRangeScans()
 //                      refineLocationPCL
 //-----------------------------------------------------------
 
-void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservation3DRangeScanPtr> &v_obs2 )
+void refineLocationGICP3D( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservation3DRangeScanPtr> &v_obs2 )
 {
     if (!initialGuessICP2D)
     {
@@ -317,6 +320,8 @@ void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObser
 
     // Show the scanned points:
     CSimplePointsMap	M1,M2;
+    //M1.insertionOptions.minDistBetweenLaserPoints = 0.01;
+    //M2.insertionOptions.minDistBetweenLaserPoints = 0.01;
 
     for ( size_t i = 0; i < v_obs.size(); i++ )
         M1.insertObservationPtr( v_obs[i] );
@@ -342,11 +347,15 @@ void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObser
     cloud_new->clear();
     cloud_trans->clear();
 
-    for ( size_t i = 0; i < xs.size(); i+= ( ( accumulatePast ) ? 1 : 1) )
+    for ( size_t i = 0; i < xs.size(); i+= ( ( accumulatePast ) ? 2 : 1) )
         cloud_old->push_back(PointXYZ(xs[i],ys[i],zs[i]));
 
     for ( size_t i = 0; i < xs2.size(); i+= ( ( accumulatePast ) ? 1 : 1) )
         cloud_new->push_back(PointXYZ(xs2[i],ys2[i],zs2[i]));
+
+    // Check if the cloud has points (GICP crashes if so)
+    if ( cloud_new->points.size() < 100 )
+        return;
 
     GeneralizedIterativeClosestPoint<PointXYZ, PointXYZ> gicp;
 
@@ -361,7 +370,7 @@ void refineLocationPCL( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObser
     //ICP options
     gicp.setMaxCorrespondenceDistance (0.2); // 0.5
     // Set the maximum number of iterations (criterion 1)
-    gicp.setMaximumIterations (10); // 10
+    gicp.setMaximumIterations (20); // 10
     // Set the transformation tras epsilon (criterion 2)
     gicp.setTransformationEpsilon (1e-5); // 1e-5
     // Set the transformation rot epsilon (criterion 3)
@@ -592,7 +601,7 @@ void refineLocationPCLBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<COb
 //                      refineLocation
 //-----------------------------------------------------------
 
-void refineLocation( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservation3DRangeScanPtr> &v_obs2)
+void refineLocationICP3D( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservation3DRangeScanPtr> &v_obs2)
 {
 
     if (!initialGuessICP2D)
@@ -797,6 +806,11 @@ int main(int argc, char **argv)
                     accumulatePast   = true;
                     cout << "[INFO] Enabled (G)ICP3D memory."  << endl;
                 }
+                else if ( !strcmp(argv[arg], "-enable_smoothing") )
+                {
+                    smooth3DObs  = true;
+                    cout << "[INFO] Enabled smoothing."  << endl;
+                }
                 else
                 {
                     cout << "[Error] " << argv[arg] << "unknown paramter" << endl;
@@ -814,7 +828,8 @@ int main(int argc, char **argv)
                     " \t -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
                     " \t -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
                     " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
-                    " \t -enable_memory: Accumulate 3D point clouds already registered." << endl;
+                    " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
+                    " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl;
 
             return 0;
         }
@@ -828,6 +843,9 @@ int main(int argc, char **argv)
 
         if ( refineWithICP3D && accumulatePast )
             o_rawlogFile += "-memory";
+
+        if ( smooth3DObs )
+            o_rawlogFile += "-smoothed";
 
         o_rawlogFile += ".rawlog";
 
@@ -865,6 +883,10 @@ int main(int argc, char **argv)
         // Compute initial guess from ICP2D
         //
 
+        cout << "---------------------------------------------------" << endl;
+        cout << "        Computing initial poses with ICP2D" << endl;
+        cout << "---------------------------------------------------" << endl;
+
         if ( initialGuessICP2D )
         {
             clock.Tic();
@@ -886,8 +908,10 @@ int main(int argc, char **argv)
                     robotPose.time = obs2D->timestamp;
                     robotPose.goodness = goodness;
 
-                    if ( goodness > 50 )
+                    if ( goodness > 80 )
                         v_robotPoses.push_back( robotPose );
+                    else
+                        v_pending3DRangeScans.clear();
 
                     // Process pending 3D range scans, if any
                     if ( !v_pending3DRangeScans.empty() )
@@ -953,13 +977,30 @@ int main(int argc, char **argv)
                 pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
                 obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
 
-                pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
+                //pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
 
                 pcl_cloud->height = 240;
                 pcl_cloud->width = 320;
 
                 applyBilateralFilter(pcl_cloud);
 
+                obs3D->points3D_x.clear();
+                obs3D->points3D_y.clear();
+                obs3D->points3D_z.clear();
+
+                size_t N_points = pcl_cloud->points.size();
+                obs3D->points3D_x.resize(N_points);
+                obs3D->points3D_y.resize(N_points);
+                obs3D->points3D_z.resize(N_points);
+
+                for ( size_t point_index = 0;
+                      point_index < N_points;
+                      point_index++ )
+                {
+                    obs3D->points3D_x[point_index] = pcl_cloud->points[point_index].x;
+                    obs3D->points3D_y[point_index] = pcl_cloud->points[point_index].y;
+                    obs3D->points3D_z[point_index] = pcl_cloud->points[point_index].z;
+                }
             }
 
             time_smoothing = clock.Tac();
@@ -1005,7 +1046,9 @@ int main(int argc, char **argv)
             refineLocationPCLBis( v_allObs[0], v_allObs[2] );
             refineLocationPCLBis( v_allObs[0], v_allObs[3] );*/
 
-            cout << "[INFO] Refining sensor poses using (G)ICP3D" << endl;
+            cout << "---------------------------------------------------" << endl;
+            cout << "         Refining sensor poses using " << ICP3D_method << endl;
+            cout << "---------------------------------------------------" << endl;
 
             vector<CObservation3DRangeScanPtr> v_obs;  // Past set of obs
             vector<CObservation3DRangeScanPtr> v_obs2(4); // Current set of obs
@@ -1072,25 +1115,25 @@ int main(int argc, char **argv)
                     {
                         if ( accumulatePast )
                         {
-                            refineLocationPCL( v_obs, v1  );
-                            refineLocationPCL( v_obs, v2  );
-                            refineLocationPCL( v_obs, v3  );
-                            refineLocationPCL( v_obs, v4  );
+                            refineLocationGICP3D( v_obs, v1  );
+                            refineLocationGICP3D( v_obs, v2  );
+                            refineLocationGICP3D( v_obs, v3  );
+                            refineLocationGICP3D( v_obs, v4  );
                         }
                         else                        
-                            refineLocationPCL( v_obs, v_obs2 );
+                            refineLocationGICP3D( v_obs, v_obs2 );
                     }
                     else
                     {
                         if ( accumulatePast )
                         {
-                            refineLocation( v_obs, v1  );
-                            refineLocation( v_obs, v2  );
-                            refineLocation( v_obs, v3  );
-                            refineLocation( v_obs, v4  );
+                            refineLocationICP3D( v_obs, v1  );
+                            refineLocationICP3D( v_obs, v2  );
+                            refineLocationICP3D( v_obs, v3  );
+                            refineLocationICP3D( v_obs, v4  );
                         }
                         else
-                            refineLocation( v_obs, v_obs2 );
+                            refineLocationICP3D( v_obs, v_obs2 );
                     }
 
                     if ( accumulatePast )
@@ -1098,11 +1141,18 @@ int main(int argc, char **argv)
                     else
                         v_obs = v_obs2;
 
-                    cout << "Time ellapsed      : " << size_t(clockLoop.Tac()/60) << " min. (" <<
-                            clockLoop.Tac() << "s.)." << endl;
-                }
-                    cout << "Total time ellapsed: " << size_t(clockEllapsedICP3D.Tac()/60) << " min. (" <<
-                            clockEllapsedICP3D.Tac() << "s.)." << endl;
+                    // Time Statistics
+
+                    cout << "Time ellapsed      : " <<
+                            size_t(clockLoop.Tac()  / SECS_PER_MIN) << " min. " <<
+                            size_t(clockLoop.Tac()) % SECS_PER_MIN << " s." << endl;
+
+                    cout << "Total time ellapsed: " <<
+                            size_t(clockEllapsedICP3D.Tac()  / SECS_PER_MIN) << " min. " <<
+                            size_t(clockEllapsedICP3D.Tac()) % SECS_PER_MIN  << " s." << endl;
+
+                    cout << "---------------------------------------------------" << endl;
+                }                    
             }
 
             cout << "Mean goodness: "
@@ -1115,20 +1165,40 @@ int main(int argc, char **argv)
 
         }
 
+        TTimeStamp totalTime;
+        TTimeParts totalTimeParts;
+        totalTime = secondsToTimestamp(time_icp3D);
+        timestampToParts(totalTime,totalTimeParts);
+
+        cout << "---------------------------------------------------" << endl;
+        cout << "                 Time statistics" << endl;
+        cout << "---------------------------------------------------" << endl;
         cout << "[INFO] time spent by the icp2D process: " << time_icp2D << " sec." << endl;
         cout << "[INFO] time spent smoothing           : " << time_smoothing << " sec." << endl;
-        cout << "[INFO] time spent by the icp3D process: " << size_t(time_icp3D/60) << " min. (" << time_icp3D << " sec.)" << endl;
+        cout << "[INFO] time spent by the icp3D process: " ;
+
+        if ( time_icp3D )
+        {
+                cout << totalTimeParts.hour << " hours " <<
+                        totalTimeParts.minute << " min. " <<
+                        totalTimeParts.second << " sec." << endl;
+        }
+        else
+            cout << time_icp3D << " sec." << endl;
+
+        cout << "---------------------------------------------------" << endl;
 
         cout << "[INFO] Saving obs to rawlog file " << o_rawlogFile << " ...";
 
         for ( size_t obs_index = 0; obs_index < v_3DRangeScans.size(); obs_index++ )
         {
             CSensoryFrame SF;
-            SF.insert( v_3DRangeScans[obs_index] );            
+            SF.insert( v_3DRangeScans[obs_index] );
+            v_3DRangeScans[obs_index]->project3DPointsFromDepthImage();
             o_rawlog.addObservationMemoryReference( v_3DRangeScans[obs_index] );
         }
 
-        o_rawlog.saveToRawLogFile( o_rawlogFile );
+        o_rawlog.saveToRawLogFile( o_rawlogFile );        
 
         cout << " completed." << endl;
 

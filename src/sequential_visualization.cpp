@@ -211,6 +211,7 @@ int main(int argc, char* argv[])
 
         CColouredPointsMap colouredMap;
         colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
+        colouredMap.insertionOptions.minDistBetweenLaserPoints = 0.01;
         colouredMap.loadFromRangeScan( *obs3D );
         size_t N_points = colouredMap.size();
 

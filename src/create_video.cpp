@@ -66,7 +66,7 @@ void getImages( CRawlog &i_rawlog, vector<CImage> &v_images,
     CImage preImage(width,height,N_channels);
     preImage.textOut(10,20,textToAdd,TColor(255,0,255));
 
-    for ( size_t i=0; i < 15; i++ )
+    for ( size_t i=0; i < 10; i++ )
         v_images.push_back(preImage);
 
 
@@ -340,7 +340,7 @@ int main(int argc, char **argv)
             for ( size_t image_index = 0; image_index < v_images.size(); image_index++ )
                 vid << v_images[image_index];
 
-            for ( size_t i = 0; i < 10; i++ )
+            for ( size_t i = 0; i < 8; i++ )
                 vid << v_images[v_images.size()-1];
         }
         else
