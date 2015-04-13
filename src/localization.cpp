@@ -56,6 +56,10 @@
 //#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/fast_bilateral.h>
 
+#include <pcl/visualization/pcl_visualizer.h>
+
+#include <pcl/visualization/cloud_viewer.h>
+
 #include <iostream>
 #include <fstream>
 
@@ -124,6 +128,60 @@ vector< TRobotPose > v_robotPoses;
 vector< CObservation3DRangeScanPtr > v_3DRangeScans;
 vector< CObservation3DRangeScanPtr > v_pending3DRangeScans;
 vector< double > v_goodness;
+
+
+//-----------------------------------------------------------
+//                      smoothing
+//-----------------------------------------------------------
+
+void smoothObs( CObservation3DRangeScanPtr obsToSmooth )
+{
+    CObservation3DRangeScanPtr obs3D = CObservation3DRangeScan::Create();
+    obs3D = obsToSmooth;
+
+    // Remove the sensor pose
+
+    obs3D.make_unique();
+    obs3D->sensorPose.setFromValues(0,0,0,0,0,0);
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+    obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
+
+    pcl_cloud->height = 240;
+    pcl_cloud->width = 320;
+
+    // Apply bilateral filter
+
+    pcl::FastBilateralFilter<pcl::PointXYZ> m_bilateralFilter;
+
+    m_bilateralFilter.setInputCloud (pcl_cloud);
+
+    m_bilateralFilter.setSigmaS (10);
+    m_bilateralFilter.setSigmaR (0.05);
+    //m_bilateralFilter.setEarlyDivision (m_bilateralFilterConf.earlyDivision);
+
+    m_bilateralFilter.filter (*pcl_cloud);
+
+    // Fill the original obs
+
+    obs3D->points3D_x.clear();
+    obs3D->points3D_y.clear();
+    obs3D->points3D_z.clear();
+
+    size_t N_points = pcl_cloud->points.size();
+    obs3D->points3D_x.resize(N_points);
+    obs3D->points3D_y.resize(N_points);
+    obs3D->points3D_z.resize(N_points);
+
+    for ( size_t point_index = 0;
+          point_index < N_points;
+          point_index++ )
+    {
+        obsToSmooth->points3D_x[point_index] = pcl_cloud->points[point_index].x;
+        obsToSmooth->points3D_y[point_index] = pcl_cloud->points[point_index].y;
+        obsToSmooth->points3D_z[point_index] = pcl_cloud->points[point_index].z;
+    }
+}
 
 //-----------------------------------------------------------
 //                      isKeyPose
@@ -769,24 +827,6 @@ void refineLocationICP3D( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObs
 }
 
 //-----------------------------------------------------------
-//                    applyBilateralFilter
-//-----------------------------------------------------------
-
-void applyBilateralFilter( pcl::PointCloud<pcl::PointXYZ>::Ptr cloud )
-{
-
-    pcl::FastBilateralFilter<pcl::PointXYZ> m_bilateralFilter;
-
-    m_bilateralFilter.setInputCloud (cloud);
-
-    m_bilateralFilter.setSigmaS (10);
-    m_bilateralFilter.setSigmaR (0.05);
-    //m_bilateralFilter.setEarlyDivision (m_bilateralFilterConf.earlyDivision);
-
-    m_bilateralFilter.filter (*cloud);
-}
-
-//-----------------------------------------------------------
 //                          main
 //-----------------------------------------------------------
 
@@ -999,46 +1039,8 @@ int main(int argc, char **argv)
 
             clock.Tic();
 
-            Eigen::Matrix4f transMat;
-
-            transMat(0,0)=0;    transMat(0,1)=-1;     transMat(0,2)=0;    transMat(0,3)=0;
-            transMat(1,0)=0;    transMat(1,1)=0;      transMat(1,2)=+1;   transMat(1,3)=0;
-            transMat(2,0)=1;    transMat(2,1)=0;      transMat(2,2)=0;    transMat(2,3)=0;
-            transMat(3,0)=0;    transMat(3,1)=0;      transMat(3,2)=0;    transMat(3,3)=1;
-
             for ( size_t i = 0; i < v_3DRangeScans.size(); i++ )
-            {
-                CObservation3DRangeScanPtr obs3D = CObservation3DRangeScan::Create();
-                obs3D = v_3DRangeScans[i];
-
-                pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
-                obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
-
-                pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
-
-                pcl_cloud->height = 240;
-                pcl_cloud->width = 320;
-
-                applyBilateralFilter(pcl_cloud);
-
-                obs3D->points3D_x.clear();
-                obs3D->points3D_y.clear();
-                obs3D->points3D_z.clear();
-
-                size_t N_points = pcl_cloud->points.size();
-                obs3D->points3D_x.resize(N_points);
-                obs3D->points3D_y.resize(N_points);
-                obs3D->points3D_z.resize(N_points);
-
-                for ( size_t point_index = 0;
-                      point_index < N_points;
-                      point_index++ )
-                {
-                    obs3D->points3D_x[point_index] = pcl_cloud->points[point_index].z;
-                    obs3D->points3D_y[point_index] = -pcl_cloud->points[point_index].x;
-                    obs3D->points3D_z[point_index] = pcl_cloud->points[point_index].y;
-                }
-            }
+                smoothObs( v_3DRangeScans[i] );
 
             time_smoothing = clock.Tac();
 
