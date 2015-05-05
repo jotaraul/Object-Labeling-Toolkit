@@ -1,6 +1,7 @@
 /*---------------------------------------------------------------------------*
- |                             HOMe-toolkit                                  |
- |       A toolkit for working with the HOME Environment dataset (HOMe)      |
+ |                         Object Labeling Toolkit                           |
+ |            A set of software components for the management and            |
+ |                      labeling of RGB-D datasets                           |
  |                                                                           |
  |              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  |
  |                 University of Malaga <jotaraul@uma.es>                    |
@@ -57,6 +58,7 @@ int main(int argc, char* argv[])
 
     bool stepByStepExecution = false;
     bool clearAfterStep = false;
+    bool showPoses = false;
 
     // Set 3D window
 
@@ -81,6 +83,10 @@ int main(int argc, char* argv[])
     obj->setColor(0.7,0.7,0.7);
     obj->setLocation(0,0,0);
     scene->insert( obj );
+
+    bool setNumberOfObs = false;
+    size_t N_limitOfObs;
+    size_t N_lowerLimitOfObs = 0;
 
     win3D.unlockAccess3DScene();
 
@@ -129,6 +135,23 @@ int main(int argc, char* argv[])
                     clearAfterStep = true;
                     arg++;
                 }
+                else if ( !strcmp(argv[arg], "-poses") )
+                {
+                    showPoses = true;
+                    arg++;
+                }
+                else if ( !strcmp(argv[arg],"-limit") )
+                {
+                    N_limitOfObs = atoi(argv[arg+1]);
+                    setNumberOfObs = true;
+                    arg += 2;
+                }
+                else if ( !strcmp(argv[arg],"-lowerLimit") )
+                {
+                    N_lowerLimitOfObs = atoi(argv[arg+1]);
+                    arg += 2;
+                }
+
                 else
                 {
                     cout << "[Error] " << argv[arg] << "unknown paramter" << endl;
@@ -145,10 +168,14 @@ int main(int argc, char* argv[])
         cout << "Then, optional parameters:" << endl <<
                 " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
                 " \t -step                  : Enable step by step execution." << endl <<
-                " \t -clear                 : Clear the scene after a step." << endl;
+                " \t -clear                 : Clear the scene after a step." << endl <<
+                " \t -limit                 : Sets a limit to the number of obs to process." <<
+                " \t -lowerLimit            : Sets a lower limit to the number of obs to process." << endl;
 
         return -1;
     }
+
+    cout << "[INFO] Loading rawlog file: " << rawlogFile << endl;
 
     rawlog.loadFromRawLogFile( rawlogFile );
 
@@ -159,9 +186,12 @@ int main(int argc, char* argv[])
 
     vector<CRenderizablePtr> v_obsInserted;
 
+    if ( !setNumberOfObs )
+        N_limitOfObs = rawlog.size();
+
     // Iterate over the obs into the rawlog and show them in the 3D/2D windows
 
-    for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
+    for ( size_t obs_index = N_lowerLimitOfObs; obs_index < N_limitOfObs; obs_index++ )
     {
         CObservationPtr obs = rawlog.getAsObservation(obs_index);
 
@@ -225,7 +255,9 @@ int main(int argc, char* argv[])
                 gl_points->setPoint_fast(i,0,0,0);
 
         scene->insert( gl_points );
-        scene->insert( sphere );
+
+        if ( showPoses )
+            scene->insert( sphere );
 
         if ( clearAfterStep )
             v_obsInserted.push_back( gl_points );

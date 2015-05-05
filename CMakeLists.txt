@@ -1,24 +1,25 @@
 
-# /*---------------------------------------------------------------------------*
-#  |                             HOMe-toolkit                                  |
-#  |       A toolkit for working with the HOME Environment dataset (HOMe)      |
-#  |                                                                           |
-#  |              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  |
-#  |                 University of Malaga <jotaraul@uma.es>                    |
-#  |             MAPIR Group: <http://http://mapir.isa.uma.es/>                |
-#  |                                                                           |
-#  |   This program is free software: you can redistribute it and/or modify    |
-#  |   it under the terms of the GNU General Public License as published by    |
-#  |   the Free Software Foundation, either version 3 of the License, or       |
-#  |   (at your option) any later version.                                     |
-#  |                                                                           |
-#  |   This program is distributed in the hope that it will be useful,         |
-#  |   but WITHOUT ANY WARRANTY; without even the implied warranty of          |
-#  |   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the            |
-#  |   GNU General Public License for more details.                            |
-#  |   <http://www.gnu.org/licenses/>                                          |
-#  |                                                                           |
-#  *---------------------------------------------------------------------------*/
+#---------------------------------------------------------------------------#
+#                         Object Labeling Toolkit                           #
+#            A set of software components for the management and            #
+#                      labeling of RGB-D datasets                           #
+#                                                                           #
+#              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  #
+#                 University of Malaga <jotaraul@uma.es>                    #
+#             MAPIR Group: <http://http://mapir.isa.uma.es/>                #
+#                                                                           #
+#   This program is free software: you can redistribute it and/or modify    #
+#   it under the terms of the GNU General Public License as published by    #
+#   the Free Software Foundation, either version 3 of the License, or       #
+#   (at your option) any later version.                                     #
+#                                                                           #
+#   This program is distributed in the hope that it will be useful,         #
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of          #
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the            #
+#   GNU General Public License for more details.                            #
+#   <http://www.gnu.org/licenses/>                                          #
+#                                                                           #
+#---------------------------------------------------------------------------#
 
 # Project name	
 PROJECT(HOMe-toolkit)
@@ -93,6 +94,8 @@ message(PCL_LIBS: ${PCL_LIBRARIES})
 ADD_EXECUTABLE(Sequential_visualization ${CMAKE_SOURCE_DIR}/src/sequential_visualization.cpp)
 TARGET_LINK_LIBRARIES(Sequential_visualization ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
+ADD_EXECUTABLE(Label_scene ${CMAKE_SOURCE_DIR}/src/label_scene.cpp)
+TARGET_LINK_LIBRARIES(Label_scene ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
 ADD_EXECUTABLE(Label_rawlog ${CMAKE_SOURCE_DIR}/src/label_rawlog.cpp)
 TARGET_LINK_LIBRARIES(Label_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} )
