@@ -1,6 +1,7 @@
 /*---------------------------------------------------------------------------*
- |                             HOMe-toolkit                                  |
- |       A toolkit for working with the HOME Environment dataset (HOMe)      |
+ |                         Object Labeling Toolkit                           |
+ |            A set of software components for the management and            |
+ |                      labeling of RGB-D datasets                           |
  |                                                                           |
  |              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  |
  |                 University of Malaga <jotaraul@uma.es>                    |
@@ -19,18 +20,16 @@
  |                                                                           |
  *---------------------------------------------------------------------------*/
 
+#include <mrpt/gui.h>
+#include <mrpt/math/utils.h>
 #include <mrpt/maps/CSimplePointsMap.h>
+#include <mrpt/maps/CColouredPointsMap.h>
 #include <mrpt/obs/CObservation2DRangeScan.h>
 #include <mrpt/obs/CObservation3DRangeScan.h>
-#include <mrpt/slam/CICP.h>
 #include <mrpt/obs/CRawlog.h>
 #include <mrpt/poses/CPose2D.h>
 #include <mrpt/poses/CPosePDF.h>
-#include <mrpt/poses/CPosePDFGaussian.h>
-#include <mrpt/gui.h>
-#include <mrpt/math/utils.h>
 #include <mrpt/system/threads.h>
-#include <mrpt/maps/CColouredPointsMap.h>
 #include <mrpt/utils/CConfigFile.h>
 
 #include <iostream>
@@ -38,15 +37,16 @@
 
 using namespace mrpt;
 using namespace mrpt::utils;
-using namespace mrpt::slam;
-using namespace std;
 using namespace mrpt::math;
 using namespace mrpt::poses;
 using namespace mrpt::obs;
 
+using namespace std;
+
 // TODOS:
 // Enable the use of more than a laser scanner
 
+// Visualization purposes
 //mrpt::gui::CDisplayWindow3D  win3D;
 
 vector<CPose3D> v_laser_sensorPoses; // Poses of the 2D laser scaners in the robot
@@ -54,15 +54,25 @@ vector<CPose3D> v_laser_sensorPoses; // Poses of the 2D laser scaners in the rob
 struct TRGBD_Sensor{
     CPose3D pose;
     string  sensorLabel;
+    bool    loadIntrinsicParameters;
 };
 
-vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses of the RGBD devices in the robot
+vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
 bool useDefaultIntrinsics;
+
+
+//-----------------------------------------------------------
+//
+//                      loadConfig
+//
+//-----------------------------------------------------------
 
 void loadConfig( const string configFileName )
 {
     CConfigFile config( configFileName );
+
+    cout << "[INFO] loading component options from " << configFileName << endl;
 
     useDefaultIntrinsics = config.read_bool("GENERAL","use_default_intrinsics","",true);
 
@@ -92,10 +102,12 @@ void loadConfig( const string configFileName )
 
             laser_pose.setFromValues(x,y,z,yaw,pitch,roll);
             v_laser_sensorPoses.push_back( laser_pose );
-            cout << "[INFO] loaded extrinsic calibration for " << sensorLabel;
+            cout << "[INFO] loaded extrinsic calibration for " << sensorLabel << endl;
+
+            sensorIndex++;
         }
-
-
+        else
+            keepLoading = false;
     }
 
     //
@@ -118,17 +130,29 @@ void loadConfig( const string configFileName )
             pitch	= DEG2RAD(config.read_double(sensorLabel,"pitch",0,true));
             roll	= DEG2RAD(config.read_double(sensorLabel,"roll",0,true));
 
+            bool loadIntrinsic = config.read_bool(sensorLabel,"loadIntrinsic",0,true);
+
             TRGBD_Sensor RGBD_sensor;
             RGBD_sensor.pose.setFromValues(x,y,z,yaw,pitch,roll);
             RGBD_sensor.sensorLabel = sensorLabel;
+            RGBD_sensor.loadIntrinsicParameters = loadIntrinsic;
             v_RGBD_sensors.push_back( RGBD_sensor );
 
-            cout << "[INFO] loaded extrinsic calibration for " << sensorLabel;
+            cout << "[INFO] loaded extrinsic calibration for " << sensorLabel << endl;
+
+            sensorIndex++;
         }
         else
             keepLoading = false;
     }
 }
+
+//-----------------------------------------------------------
+//
+//                      getSensorPos
+//
+//-----------------------------------------------------------
+
 
 size_t getSensorPos( const string label )
 {
@@ -138,8 +162,31 @@ size_t getSensorPos( const string label )
             return i;
     }
 
-    return 0;
+    return -1;
 }
+
+//-----------------------------------------------------------
+//
+//                    showUsageInformation
+//
+//-----------------------------------------------------------
+
+void showUsageInformation()
+{
+    cout << "Usage information. At least two expected arguments: " << endl <<
+            " \t (1) Rawlog file." << endl <<
+            " \t (2) Configuration file." << endl <<
+            cout << "Then, optional parameters:" << endl <<
+            " \t -h             : Shows this help." << endl <<
+            " \t -only_hokuyo : Process only hokuyo observations." << endl;
+}
+
+
+//-----------------------------------------------------------
+//main
+//                          main
+//
+//-----------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
@@ -176,6 +223,8 @@ int main(int argc, char* argv[])
         string hokuyo = "HOKUYO1";
         bool onlyHokuyo = false;
 
+        string configFileName;
+
         string i_rawlogFilename;
         string o_rawlogFileName;
 
@@ -193,9 +242,7 @@ int main(int argc, char* argv[])
         if ( argc >= 3 )
         {
             i_rawlogFilename = argv[1];
-            string configFileName = argv[2];
-
-            loadConfig( configFileName );
+            configFileName = argv[2];
 
             for ( size_t arg = 3; arg < argc; arg++ )
             {
@@ -204,9 +251,15 @@ int main(int argc, char* argv[])
                     onlyHokuyo = true;
                     cout << "[INFO] Processing only hokuyo observations."  << endl;
                 }
+                if ( !strcmp(argv[arg],"-h") )
+                {
+                    showUsageInformation();
+                    return 0;
+                }
                 else
                 {
                     cout << "[ERROR] Unknown option " << argv[arg] << endl;
+                    showUsageInformation();
                     return -1;
                 }
             }
@@ -214,14 +267,16 @@ int main(int argc, char* argv[])
         }
         else
         {
-            cout << "Usage information. At least two expected arguments: " << endl <<
-                    " \t (1) Rawlog file." << endl <<
-                    " \t (2) Configuration file." << endl <<
-                    cout << "Then, optional parameters:" << endl <<
-                    " \t -only_hokuyo : Process only hokuyo observations." << endl;
+            showUsageInformation();
 
             return 0;
         }
+
+        //
+        // Load config information
+        //
+
+        loadConfig( configFileName );
 
         //
         // Open rawlog file
@@ -238,10 +293,14 @@ int main(int argc, char* argv[])
 
         for ( size_t obsIndex = 0; obsIndex < i_rawlog.size(); obsIndex++ )
         {
+            // Show progress
+
             cout << "Processing " << obsIndex << " of " << i_rawlog.size() << '\xd';
             mrpt::system::sleep(10);
 
             CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
+
+            // Observation from a laser range scan device
 
             if ( obs->sensorLabel == hokuyo )
             {
@@ -255,9 +314,11 @@ int main(int argc, char* argv[])
             }
             else
             {
+                // RGBD observation?
+
                 size_t RGBD_sensorIndex = getSensorPos(obs->sensorLabel);
 
-                if ( RGBD_sensorIndex )
+                if ( RGBD_sensorIndex >= 0 )
                 {
                     TRGBD_Sensor &sensor = v_RGBD_sensors[RGBD_sensorIndex];
                     CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
@@ -272,15 +333,29 @@ int main(int argc, char* argv[])
                     }
                     else
                     {
-                        obs3D->cameraParams.scaleToResolution(320,244);
-                        obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                        if ( sensor.loadIntrinsicParameters )
+                        {
+                            CConfigFile config( configFileName );
+
+                            obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_depth",config);
+                            obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_intensity",config);
+                        }
+                        else
+                        {
+                            obs3D->cameraParams.scaleToResolution(320,244);
+                            obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                        }
+
                     }
 
                     obs3D->project3DPointsFromDepthImage();
 
                     o_rawlog.addObservationMemoryReference(obs3D);
 
-                    /*mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
+                    // Visualization purposes
+
+                    /*
+                    mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
 
                     mrpt::slam::CColouredPointsMap colouredMap;
                     colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;

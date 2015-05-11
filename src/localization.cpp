@@ -1,6 +1,7 @@
 /*---------------------------------------------------------------------------*
- |                             HOMe-toolkit                                  |
- |       A toolkit for working with the HOME Environment dataset (HOMe)      |
+ |                         Object Labeling Toolkit                           |
+ |            A set of software components for the management and            |
+ |                      labeling of RGB-D datasets                           |
  |                                                                           |
  |              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  |
  |                 University of Malaga <jotaraul@uma.es>                    |
@@ -908,6 +909,27 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_o
 }
 
 //-----------------------------------------------------------
+//
+//                          main
+//
+//-----------------------------------------------------------
+
+void showUsageInformation()
+{
+    cout << "Usage information. Two expected arguments: " << endl <<
+            " \t (1) Rawlog file." << endl <<
+            " \t (2) Points map file." << endl;
+    cout << "Then, optional parameters:" << endl <<
+            " \t -h             : Shows this help." << endl <<
+            " \t -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
+            " \t -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
+            " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
+            " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
+            " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
+            " \t -enable_keyPoses : Enable the use of key poses only." << endl;
+}
+
+//-----------------------------------------------------------
 //                          main
 //-----------------------------------------------------------
 
@@ -974,9 +996,15 @@ int main(int argc, char **argv)
                     smooth3DObs  = true;
                     cout << "[INFO] Enabled smoothing."  << endl;
                 }
+                else if ( !strcmp(argv[arg], "-h") )
+                {
+                    showUsageInformation();
+                    return 0;
+                }
                 else
                 {
                     cout << "[Error] " << argv[arg] << "unknown paramter" << endl;
+                    showUsageInformation();
                     return -1;
                 }
 
@@ -984,16 +1012,7 @@ int main(int argc, char **argv)
         }
         else
         {
-            cout << "Usage information. Two expected arguments: " << endl <<
-                    " \t (1) Rawlog file." << endl <<
-                    " \t (2) Points map file." << endl;
-            cout << "Then, optional parameters:" << endl <<
-                    " \t -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
-                    " \t -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
-                    " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
-                    " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
-                    " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
-                    " \t -enable_keyPoses : Enable the use of key poses only." << endl;
+            showUsageInformation();
 
             return 0;
         }
