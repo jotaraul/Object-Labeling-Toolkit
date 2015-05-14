@@ -34,7 +34,6 @@
 #include <mrpt/obs/CRawlog.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/opengl.h>
-//#include <mrpt/maps.h>
 #include <mrpt/utils/CConfigFile.h>
 
 #include <pcl/point_types.h>
@@ -102,33 +101,10 @@ struct TLabelledBox
 
 struct TConfiguration
 {
-    bool doPlanarSegmentation;
-    bool fusePlanes;
-    bool doEuclideanSegmentation;
-    bool showSegmentation;
-    bool showColouredRegions;
-    bool labelClusters;
-    bool trackClusters;
-    string rawlogFile;
-    string labelledScene;
+    bool      visualizeLabels;
+    string    rawlogFile;
+    string    labelledScene;
 };
-
-struct TPlanarSegmentationConfig
-{
-    size_t	minPlaneInliers;
-    double	distThreshold;
-    double	angleThreshold;
-    double	maximumCurvature;
-
-};
-
-struct TEuclideanSegmentationConfig
-{
-    double clusterTolerance;
-    size_t minClusterSize;
-    size_t maxClusterSize;
-};
-
 
 //
 //  Global variables
@@ -141,10 +117,11 @@ TConfiguration                  configuration;
 
 vector<vector<CPose3D> >        v_posesPerSensor;
 vector<TLabelledBox>            v_labelled_boxes;
-map<string,size_t>              v_labels; // Map <label,pos in the colors vector>
+map<string,TPoint3D>            m_labels; // Map <label,pos in the colors vector>
+
 
 vector<vector< uint8_t > > v_colors;
-map< string, TPoint3D > m_labelColors;
+
 
 void  loadLabelledScene();
 
@@ -156,15 +133,41 @@ void loadConfig( string const configFile )
 {
     CConfigFile config( configFile );
 
-    configuration.showColouredRegions       = config.read_bool("GENERAL","showColouredRegions",0,true);
-    configuration.labelClusters             = config.read_bool("GENERAL","labelClusters",0,true);
-    configuration.trackClusters             = config.read_bool("GENERAL","trackClusters",0,true);
+    configuration.visualizeLabels             = config.read_bool("GENERAL","visualizeLabels",0,true);
 
     configuration.rawlogFile                = config.read_string("GENERAL","rawlogFile","",true);
     configuration.labelledScene             = config.read_string("GENERAL","labelledScene","",true);
 
-    cout << "Rawlog file   : " << configuration.rawlogFile << endl;
-    cout << "Labeled scene : " << configuration.labelledScene << endl;
+    vector<string> v_labelNames;
+    config.read_vector("LABELS","labelNames",vector<string>(0),v_labelNames,true);
+
+    size_t magicNumber = ceil(pow(v_labelNames.size(),1.0/3.0));
+
+    cout << "Magic number: " << magicNumber << endl;
+
+    vector<TPoint3D> v_colors;
+
+    for ( double r = 0; r < magicNumber; r+= 1 )
+        for ( double g = 0; g < magicNumber; g+= 1 )
+            for ( double b = 0; b < magicNumber; b+= 1 )
+                v_colors.push_back(TPoint3D(1.0*(1-r/(magicNumber-1)),
+                                    1.0*(1-g/(magicNumber-1)),
+                                    1.0*(1-b/(magicNumber-1))));
+
+
+    for ( size_t i_label = 0; i_label < v_labelNames.size(); i_label++ )
+            m_labels[v_labelNames[i_label]] = v_colors[i_label];
+
+
+    cout << "[INFO] Rawlog file   : " << configuration.rawlogFile << endl;
+    cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
+
+    cout << "[INFO] Loaded labels: " << endl;
+
+    map<string,TPoint3D>::iterator it;
+
+    for ( it = m_labels.begin(); it != m_labels.end(); it++ )
+        cout << " - " << it->first << ", with color " << it->second << endl;
 
     cout << "[INFO] Configuration successfully loaded." << endl;
 
@@ -240,8 +243,8 @@ void  loadLabelledScene()
 
                 v_labelled_boxes.push_back( labelled_box );
 
-                if ( !v_labels.count(labelled_box.label) )
-                    v_labels[labelled_box.label]=v_labels.size()-1;
+                if ( !m_labels.count(labelled_box.label) )
+                    cout << "[CAUTION] label " << labelled_box.label << "does not appear in the label list." << endl;
 
             }
 
@@ -249,14 +252,7 @@ void  loadLabelledScene()
         }
 
         cout << "[INFO] Label clusters on, " << v_labelled_boxes.size() <<  " labelled boxes loaded." << endl;
-        cout << "[INFO] Loaded labels: " << endl;
 
-        cout << "[INFO] Labels loaded: " << endl;
-
-        map<string,size_t>::iterator it;
-
-        for ( it = v_labels.begin(); it != v_labels.end(); it++ )
-            cout << " - " << it->first << ", with color index " << it->second << endl;
     }
     else
         cout << "[ERROR] While loading the labelled scene file." << endl;
@@ -266,6 +262,8 @@ void  loadLabelledScene()
 
 void labelObs(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
+    map<string,TPoint3D>::iterator it;
+
     size_t N_boxes = v_labelled_boxes.size();
 
     vector<vector<int > > v_indices(N_boxes);
@@ -308,7 +306,7 @@ void labelObs(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 //        uint8_t color_g = v_colors[colorIndex][1];
 //        uint8_t color_b = v_colors[colorIndex][2];
 
-        TPoint3D color = m_labelColors[box.label];
+        TPoint3D color = m_labels[box.label];
         uint8_t color_r = color.x*255;
         uint8_t color_g = color.y*255;
         uint8_t color_b = color.z*255;
@@ -350,53 +348,6 @@ int main(int argc, char* argv[])
     CRawlog rawlog;
     bool stepByStepExecution = false;
 
-    // Create vector of colors for visualization
-
-    m_labelColors["floor"] =    TPoint3D(1.0*0.8, 1.0*0.4, 1.0*0.0);
-    m_labelColors["ceiling"] =  TPoint3D(1.0*0.0, 1.0*0.0, 1.0*0.2);
-    m_labelColors["bed"] =      TPoint3D(1.0*0.0, 1.0*0.2, 1.0*0.0);
-    m_labelColors["lamp"] =     TPoint3D(1.0*0.0, 1.0*0.2, 1.0*0.2);
-    m_labelColors["table"] =    TPoint3D(1.0*0.2, 1.0*0.0, 1.0*0.0);
-    m_labelColors["chair"] =    TPoint3D(1.0*0.2, 1.0*0.0, 1.0*0.2);
-    m_labelColors["night_stand"] = TPoint3D(1.0*0.2, 1.0*0.2, 1.0*0.0);
-    m_labelColors["pillow"] =   TPoint3D(1.0*0.2, 1.0*0.2, 1.0*0.2);
-    m_labelColors["wall"] =     TPoint3D(1.0*0.0, 1.0*0.0, 1.0*0.4);
-    m_labelColors["computer_screen"] = TPoint3D(1.0*0.0, 1.0*0.4, 1.0*0.0);
-    m_labelColors["pc"] =       TPoint3D(1.0*0.0, 1.0*0.4, 1.0*0.4);
-    m_labelColors["keyboard"] = TPoint3D(1.0*0.4, 1.0*0.0, 1.0*0.0);
-    m_labelColors["door"] =     TPoint3D(1.0*0.4, 1.0*0.0, 1.0*0.4);
-    m_labelColors["shelf"] =    TPoint3D(1.0*0.4, 1.0*0.4, 1.0*0.0);
-    m_labelColors["shelves"] =  TPoint3D(1.0*0.4, 1.0*0.4, 1.0*0.4);
-    m_labelColors["book"] =     TPoint3D(1.0*0.0, 1.0*0.0, 1.0*0.8);
-    m_labelColors["mouse"] =    TPoint3D(1.0*0.0, 1.0*0.8, 1.0*0.0);
-    m_labelColors["window"] =   TPoint3D(1.0*0.0, 1.0*0.8, 1.0*0.8);
-    m_labelColors["curtain"] =  TPoint3D(1.0*0.8, 1.0*0.0, 1.0*0.0);
-    m_labelColors["clutter"] =  TPoint3D(1.0*0.8, 1.0*0.0, 1.0*0.8);
-    m_labelColors["closet"] =   TPoint3D(1.0*0.8, 1.0*0.8, 1.0*0.0);
-    m_labelColors["clock_alarm"] = TPoint3D(1.0*0.8, 1.0*0.8, 1.0*0.8);
-    m_labelColors["lamp"] =    TPoint3D(1.0*0.0, 1.0*0.0, 1.0*1.0);
-    m_labelColors["picture"] =    TPoint3D(1.0*0.0, 1.0*1.0, 1.0*0.0);
-    m_labelColors["computer"] =    TPoint3D(1.0*0.0, 1.0*1.0, 1.0*1.0);
-    m_labelColors["shoes"] =    TPoint3D(1.0*1.0, 1.0*0.0, 1.0*0.2);
-
-    m_labelColors["fridge"] =    TPoint3D(1.0*0.0, 1.0*0.5, 1.0*0.5);
-    m_labelColors["oven"] =     TPoint3D(1.0*0.5, 1.0*0.5, 1.0*0.0);
-    m_labelColors["cabinet"] =  TPoint3D(1.0*0.5, 1.0*0.0, 1.0*0.5);
-    m_labelColors["counter"] =  TPoint3D(1.0*0.5, 1.0*0.5, 1.0*0.5);
-    m_labelColors["paper_roll"] = TPoint3D(1.0*0.0, 1.0*0.7, 1.0*0.7);
-    m_labelColors["pot"] =      TPoint3D(1.0*0.7, 1.0*0.7, 1.0*0.0);
-    m_labelColors["microwave"] =  TPoint3D(1.0*0.8, 1.0*0.15, 1.0*0.5);
-    m_labelColors["bowl"] =     TPoint3D(1.0*0.0, 1.0*0.3, 1.0*0.3);
-    m_labelColors["milk_bottle"] =TPoint3D(1.0*0.3, 1.0*0.0, 1.0*0.3);
-    m_labelColors["cereal_box"] = TPoint3D(1.0*0.3, 1.0*0.3, 1.0*0.0);
-    m_labelColors["scourer"] =    TPoint3D(1.0*0.9, 1.0*0.3, 1.0*0.3);
-    m_labelColors["faucet"] =   TPoint3D(1.0*0.0, 1.0*0.7, 1.0*0.3);
-    m_labelColors["sink"] =     TPoint3D(1.0*0.7, 1.0*0.0, 1.0*0.3);
-    m_labelColors["stove"] =     TPoint3D(1.0*0.7, 1.0*0.3, 1.0*0.0);
-    m_labelColors["trash_bin"] =     TPoint3D(1.0*0.15, 1.0*0.7, 1.0*0.15);
-    m_labelColors["door"] =     TPoint3D(1.0*0.15, 1.0*0.3, 1.0*0.8);
-
-
     /*for ( size_t mult1 = 150; mult1 <= 255; mult1+= 20 )
         for ( size_t mult2 = 150; mult2 <= 255; mult2+= 20 )
             for ( size_t mult3 = 150; mult3 <= 255; mult3+= 20 )
@@ -434,17 +385,17 @@ int main(int argc, char* argv[])
     {
         // Get configuration file name
 
-        /*cout << "1:" << argv[1] << endl;
+        cout << "1:" << argv[1] << endl;
 
         string configFile = argv[1];
-        loadConfig(configFile);*/
+        loadConfig(configFile);
 
         // Get optional paramteres
         if ( argc > 2 )
         {
             bool alreadyReset = false;
 
-            size_t arg = 1;
+            size_t arg = 2;
 
             while ( arg < argc )
             {
@@ -510,11 +461,6 @@ int main(int argc, char* argv[])
         // Check if the sensor is being used
         if ( find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel) == sensors_to_use.end() )
             continue;
-
-        // Get sensor index
-        size_t sensor_index = find(sensors_to_use.begin(),
-                                   sensors_to_use.end(),obs->sensorLabel)
-                - sensors_to_use.begin();
 
         // Get obs pose
         CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
