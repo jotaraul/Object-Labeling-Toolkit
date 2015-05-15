@@ -25,12 +25,7 @@
 
 #include <mrpt/math.h>
 #include <mrpt/obs/CObservation3DRangeScan.h>
-#include <mrpt/opengl/CPointCloudColoured.h>
-#include <mrpt/opengl/CGridPlaneXY.h>
-#include <mrpt/opengl/CSphere.h>
-#include <mrpt/opengl/CArrow.h>
-#include <mrpt/opengl/CSetOfLines.h>
-#include <mrpt/opengl/CAxis.h>
+
 #include <mrpt/obs/CRawlog.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/opengl.h>
@@ -72,26 +67,12 @@ using namespace std;
 //  Data types
 //
 
-struct TSegmentedRegion
-{
-    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud;
-    pcl::PointIndices       indices;
-    pcl::PointCloud<pcl::PointXYZ>::Ptr convexHullCloud;
-    vector<pcl::Vertices>   polygons;
-    string                  label;
-    size_t                  track_id;
-    TPoint3D                color;
-    mrpt::opengl::CBoxPtr   box;
-
-    TSegmentedRegion() : convexHullCloud(new pcl::PointCloud<pcl::PointXYZ>()),
-        box( CBox::Create() )
-    {}
-};
-
 struct TLabelledBox
 {
-    CBoxPtr                 box;
-    string                  label;
+    // Loaded from .scene file
+    CBoxPtr box;   // object containing the corners of the object's bounding box
+    string  label; // e.g. scourer, bowl, or scourer_1, bowl_3 if working with instances
+    // Computed
     pcl::PointCloud<pcl::PointXYZ>::Ptr convexHullCloud;
     vector<pcl::Vertices>   polygons;
 
@@ -101,42 +82,41 @@ struct TLabelledBox
 
 struct TConfiguration
 {
-    bool      visualizeLabels;
-    string    rawlogFile;
-    string    labelledScene;
+    bool    visualizeLabels;// Enable visualization of individual observations
+    string  rawlogFile;     // Rawlog file to be labeled
+    string  labelledScene;  // Scene already labeled by "Label_scene"
+    bool    instancesLabeled; // Are we working with instances? e.g. knife_1
 };
 
 //
 //  Global variables
 //
 
-mrpt::gui::CDisplayWindow3D     win3D;
-mrpt::opengl::COpenGLScenePtr   labelledScene;
+TConfiguration          configuration;
 
-TConfiguration                  configuration;
+vector<TLabelledBox>    v_labelled_boxes;
+map<string,TPoint3D>    m_consideredLabels; // Map <label,color>
+vector<string>          v_appearingLabels;
 
-vector<vector<CPose3D> >        v_posesPerSensor;
-vector<TLabelledBox>            v_labelled_boxes;
-map<string,TPoint3D>            m_labels; // Map <label,pos in the colors vector>
-
-
-vector<vector< uint8_t > > v_colors;
-
-
-void  loadLabelledScene();
+typedef boost::shared_ptr<pcl::visualization::PCLVisualizer> pclWindow;
 
 //-----------------------------------------------------------
-//                        loadConfig
+//
+//                      loadConfig
+//
 //-----------------------------------------------------------
 
 void loadConfig( string const configFile )
 {
     CConfigFile config( configFile );
 
-    configuration.visualizeLabels             = config.read_bool("GENERAL","visualizeLabels",0,true);
+    // Load general configuration
 
-    configuration.rawlogFile                = config.read_string("GENERAL","rawlogFile","",true);
-    configuration.labelledScene             = config.read_string("GENERAL","labelledScene","",true);
+    configuration.visualizeLabels = config.read_bool("GENERAL","visualizeLabels",0,true);
+    configuration.rawlogFile      = config.read_string("GENERAL","rawlogFile","",true);
+    configuration.labelledScene   = config.read_string("GENERAL","labelledScene","",true);
+
+    // Load object labels (classes) to be considered
 
     vector<string> v_labelNames;
     config.read_vector("LABELS","labelNames",vector<string>(0),v_labelNames,true);
@@ -151,22 +131,18 @@ void loadConfig( string const configFile )
         for ( double g = 0; g < magicNumber; g+= 1 )
             for ( double b = 0; b < magicNumber; b+= 1 )
                 v_colors.push_back(TPoint3D(1.0*(1-r/(magicNumber-1)),
-                                    1.0*(1-g/(magicNumber-1)),
-                                    1.0*(1-b/(magicNumber-1))));
+                                            1.0*(1-g/(magicNumber-1)),
+                                            1.0*(1-b/(magicNumber-1))));
 
 
     for ( size_t i_label = 0; i_label < v_labelNames.size(); i_label++ )
-            m_labels[v_labelNames[i_label]] = v_colors[i_label];
-
-
-    cout << "[INFO] Rawlog file   : " << configuration.rawlogFile << endl;
-    cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
+        m_consideredLabels[v_labelNames[i_label]] = v_colors[i_label];
 
     cout << "[INFO] Loaded labels: " << endl;
 
     map<string,TPoint3D>::iterator it;
 
-    for ( it = m_labels.begin(); it != m_labels.end(); it++ )
+    for ( it = m_consideredLabels.begin(); it != m_consideredLabels.end(); it++ )
         cout << " - " << it->first << ", with color " << it->second << endl;
 
     cout << "[INFO] Configuration successfully loaded." << endl;
@@ -175,11 +151,15 @@ void loadConfig( string const configFile )
 
 
 //-----------------------------------------------------------
+//
 //                    loadLabelledScene
+//
 //-----------------------------------------------------------
 
 void  loadLabelledScene()
 {
+    mrpt::opengl::COpenGLScenePtr   labelledScene;
+
     labelledScene = mrpt::opengl::COpenGLScene::Create();
     if ( labelledScene->loadFromFile( configuration.labelledScene ) )
     {
@@ -243,9 +223,14 @@ void  loadLabelledScene()
 
                 v_labelled_boxes.push_back( labelled_box );
 
-                if ( !m_labels.count(labelled_box.label) )
-                    cout << "[CAUTION] label " << labelled_box.label << "does not appear in the label list." << endl;
+                if ( !m_consideredLabels.count(labelled_box.label) )
+                    cout << "[CAUTION] label " << labelled_box.label << " does not appear in the label list." << endl;
 
+                // Check if the label has been already inserted
+                if ( find(v_appearingLabels.begin(),
+                          v_appearingLabels.end(),
+                          labelled_box.label) == v_appearingLabels.end() )
+                    v_appearingLabels.push_back(labelled_box.label);
             }
 
             boxes_inserted++;
@@ -259,8 +244,31 @@ void  loadLabelledScene()
 
 }
 
+//-----------------------------------------------------------
+//
+//                    getInstanceLabel
+//
+//-----------------------------------------------------------
 
-void labelObs(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
+string getInstanceLabel(const string &instaceLabel )
+{
+    map<string,TPoint3D>::iterator it;
+
+    for ( it = m_consideredLabels.begin(); it != m_consideredLabels.end(); it++ )
+        if ( it->first.find(instaceLabel)!=std::string::npos )
+            return it->first;
+
+    return "";
+}
+
+//-----------------------------------------------------------
+//
+//                      labelObs
+//
+//-----------------------------------------------------------
+
+void labelObs(CObservation3DRangeScanPtr obs,
+              pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
     map<string,TPoint3D>::iterator it;
 
@@ -268,8 +276,13 @@ void labelObs(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 
     vector<vector<int > > v_indices(N_boxes);
 
-    boost::shared_ptr<pcl::visualization::PCLVisualizer>	viewer(new pcl::visualization::PCLVisualizer ("3D Viewer"));
-    viewer->initCameraParameters ();
+    pclWindow viewer;
+
+    if ( configuration.visualizeLabels )
+    {
+        viewer = pclWindow(new pcl::visualization::PCLVisualizer ("3D Viewer"));
+        viewer->initCameraParameters ();
+    }
 
     for ( size_t box_index = 0; box_index < v_labelled_boxes.size(); box_index++ )
     {
@@ -287,57 +300,77 @@ void labelObs(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
         cropHull.setDim(3);
 
 
-//        viewer->removeAllPointClouds();
-//        viewer->addPointCloud( cloud );
-//        viewer->resetStoppedFlag();
-//        while (!viewer->wasStopped())
-//            viewer->spinOnce(100);
+        //        viewer->removeAllPointClouds();
+        //        viewer->addPointCloud( cloud );
+        //        viewer->resetStoppedFlag();
+        //        while (!viewer->wasStopped())
+        //            viewer->spinOnce(100);
 
         cropHull.filter(v_indices[box_index]);
         cropHull.filter(*outputCloud);
 
-        cout << "Size of indices: " << v_indices[box_index].size() << endl;
+        //cout << "Size of indices: " << v_indices[box_index].size() << endl;
 
+        //
         // Give color to the point cloud excerpt
-        pcl::PointCloud<pcl::PointXYZRGB>::Ptr coloredOutputCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+        //
 
-//        size_t colorIndex = (v_labels[box.label]*5)%255;
-//        uint8_t color_r = v_colors[colorIndex][0];
-//        uint8_t color_g = v_colors[colorIndex][1];
-//        uint8_t color_b = v_colors[colorIndex][2];
-
-        TPoint3D color = m_labels[box.label];
-        uint8_t color_r = color.x*255;
-        uint8_t color_g = color.y*255;
-        uint8_t color_b = color.z*255;
-
-        for ( size_t point = 0; point < outputCloud->size(); point++ )
+        if ( configuration.visualizeLabels )
         {
 
-            pcl::PointXYZRGB coloredPoint(color_r,color_g,color_b);
-            coloredPoint.x = outputCloud->points[point].x;
-            coloredPoint.y = outputCloud->points[point].y;
-            coloredPoint.z = outputCloud->points[point].z;
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr coloredOutputCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+
+            TPoint3D color;
+
+            if ( configuration.instancesLabeled )
+            {
+                string label = getInstanceLabel(box.label);
+                if ( label.size() )
+                    color = m_consideredLabels[label];
+                else
+                    color = TPoint3D(1,1,1);
+            }
+            else
+                color = m_consideredLabels[box.label];
+
+            uint8_t color_r = color.x*255;
+            uint8_t color_g = color.y*255;
+            uint8_t color_b = color.z*255;
+
+            for ( size_t point = 0; point < outputCloud->size(); point++ )
+            {
+
+                pcl::PointXYZRGB coloredPoint(color_r,color_g,color_b);
+                coloredPoint.x = outputCloud->points[point].x;
+                coloredPoint.y = outputCloud->points[point].y;
+                coloredPoint.z = outputCloud->points[point].z;
 
 
-            coloredOutputCloud->points.push_back(coloredPoint);
+                coloredOutputCloud->points.push_back(coloredPoint);
+            }
+
+            //viewer->removeAllPointClouds();
+            //viewer->addPointCloud( box.convexHullCloud );
+            stringstream ss;
+            ss << "Outputcloud_" << box_index;
+            viewer->addPointCloud( coloredOutputCloud,string(ss.str()) );
         }
-
-        //viewer->removeAllPointClouds();
-        //viewer->addPointCloud( box.convexHullCloud );
-        stringstream ss;
-        ss << "Outputcloud_" << box_index;
-        viewer->addPointCloud( coloredOutputCloud,string(ss.str()) );
 
     }
 
-    viewer->resetStoppedFlag();
-    while (!viewer->wasStopped())
-        viewer->spinOnce(100);
+    // Visualize labeling results
+    if ( configuration.visualizeLabels )
+    {
+        viewer->resetStoppedFlag();
+        while (!viewer->wasStopped())
+            viewer->spinOnce(100);
+    }
 }
 
 //-----------------------------------------------------------
-//                          main
+//
+//                        main
+//
 //-----------------------------------------------------------
 
 int main(int argc, char* argv[])
@@ -347,39 +380,6 @@ int main(int argc, char* argv[])
     vector<string> sensors_to_use;
     CRawlog rawlog;
     bool stepByStepExecution = false;
-
-    /*for ( size_t mult1 = 150; mult1 <= 255; mult1+= 20 )
-        for ( size_t mult2 = 150; mult2 <= 255; mult2+= 20 )
-            for ( size_t mult3 = 150; mult3 <= 255; mult3+= 20 )
-            {
-                vector<uint8_t> color;
-                color.push_back(mult1);
-                color.push_back(mult2);
-                color.push_back(mult3);
-                v_colors.push_back( color );
-            }*/
-
-    //
-    // Set 3D window for visualization purposes
-    //
-
-    win3D.setWindowTitle("Rawlog labeling");
-
-    win3D.resize(400,300);
-
-    win3D.setCameraAzimuthDeg(140);
-    win3D.setCameraElevationDeg(20);
-    win3D.setCameraZoom(6.0);
-    win3D.setCameraPointingToPoint(2.5,0,0);
-
-    mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
-
-    opengl::CGridPlaneXYPtr obj = opengl::CGridPlaneXY::Create(-7,7,-7,7,0,1);
-    obj->setColor(0.7,0.7,0.7);
-    obj->setLocation(0,0,0);
-    scene->insert( obj );
-
-    win3D.unlockAccess3DScene();
 
     if ( argc > 1 )
     {
@@ -446,8 +446,8 @@ int main(int argc, char* argv[])
 
     rawlog.loadFromRawLogFile( configuration.rawlogFile );
 
-    cout << "Rawlog file   : " << configuration.rawlogFile << " " << rawlog.size() << " obs" << endl;
-    cout << "Labeled scene : " << configuration.labelledScene << endl;
+    cout << "[INFO] Rawlog file   : " << configuration.rawlogFile << " " << rawlog.size() << " obs" << endl;
+    cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
     loadLabelledScene();
 
     // Iterate over the obs into the rawlog and show them labeled in the 3D window
@@ -492,31 +492,14 @@ int main(int argc, char* argv[])
         pcl_cloud->height = 240;
         pcl_cloud->width = 320;
 
+        //
         // Label observation
+        //
 
         cout << "[INFO] Labeling observation." << endl;
 
-        labelObs( pcl_cloud );
+        labelObs( obs3D, pcl_cloud );
 
-
-        mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
-
-        mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
-        gl_points->setPointSize(6);
-
-        CColouredPointsMap colouredMap;
-
-        gl_points->loadFromPointsMap( &colouredMap );
-        scene->insert( gl_points );
-        win3D.unlockAccess3DScene();
-
-        scene = win3D.get3DSceneAndLock();
-
-        win3D.unlockAccess3DScene();
-        win3D.repaint();
-
-        if ( stepByStepExecution )
-            win3D.waitForKey();
     }
 
     mrpt::system::pause();
