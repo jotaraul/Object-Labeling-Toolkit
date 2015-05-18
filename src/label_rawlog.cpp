@@ -30,6 +30,7 @@
 #include <mrpt/system/threads.h>
 #include <mrpt/opengl.h>
 #include <mrpt/utils/CConfigFile.h>
+#include <mrpt/gui/CDisplayWindow.h>
 
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
@@ -100,6 +101,27 @@ vector<string>          v_appearingLabels;
 
 typedef boost::shared_ptr<pcl::visualization::PCLVisualizer> pclWindow;
 
+mrpt::gui::CDisplayWindow window("Labeled depth img");
+
+
+//-----------------------------------------------------------
+//
+//                  showUsageInformation
+//
+//-----------------------------------------------------------
+
+void showUsageInformation()
+{
+cout << "Usage information. At least one expected arguments: " << endl <<
+        " \t <conf_fil>       : Configuration file." << endl;
+cout << "Then, optional parameters:" << endl <<
+        " \t -h                     : This help." << endl <<
+        " \t -i <rawlog_file>       : Rawlog file to process." << endl <<
+        " \t -sensor <sensor_label> : Use obs. from this sensor (none used by default)." << endl <<
+        " \t -step                  : Enable step by step execution." << endl;
+}
+
+
 //-----------------------------------------------------------
 //
 //                      loadConfig
@@ -158,6 +180,7 @@ void loadConfig( string const configFile )
 
 void  loadLabelledScene()
 {
+
     mrpt::opengl::COpenGLScenePtr   labelledScene;
 
     labelledScene = mrpt::opengl::COpenGLScene::Create();
@@ -236,13 +259,14 @@ void  loadLabelledScene()
             boxes_inserted++;
         }
 
-        cout << "[INFO] Label clusters on, " << v_labelled_boxes.size() <<  " labelled boxes loaded." << endl;
+        cout << "[INFO] " << v_labelled_boxes.size() <<  " labelled boxes loaded." << endl;
 
     }
     else
         cout << "[ERROR] While loading the labelled scene file." << endl;
 
 }
+
 
 //-----------------------------------------------------------
 //
@@ -261,6 +285,7 @@ string getInstanceLabel(const string &instaceLabel )
     return "";
 }
 
+
 //-----------------------------------------------------------
 //
 //                      labelObs
@@ -268,20 +293,27 @@ string getInstanceLabel(const string &instaceLabel )
 //-----------------------------------------------------------
 
 void labelObs(CObservation3DRangeScanPtr obs,
-              pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
+              pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
+              size_t N_rows, size_t N_cols )
 {
     map<string,TPoint3D>::iterator it;
 
     size_t N_boxes = v_labelled_boxes.size();
 
-    vector<vector<int > > v_indices(N_boxes);
-
     pclWindow viewer;
+
+    CImage img(N_rows,N_cols);
+
+    img.setOriginTopLeft(false);
 
     if ( configuration.visualizeLabels )
     {
         viewer = pclWindow(new pcl::visualization::PCLVisualizer ("3D Viewer"));
         viewer->initCameraParameters ();
+
+        for ( size_t row = 0; row < N_rows; row++ )
+            for ( size_t col = 0; col < N_cols; col++ )
+                img.setPixel(row, col, 0);
     }
 
     for ( size_t box_index = 0; box_index < v_labelled_boxes.size(); box_index++ )
@@ -306,66 +338,132 @@ void labelObs(CObservation3DRangeScanPtr obs,
         //        while (!viewer->wasStopped())
         //            viewer->spinOnce(100);
 
-        cropHull.filter(v_indices[box_index]);
-        cropHull.filter(*outputCloud);
+        vector<int>     v_indices;
 
+        cropHull.filter(v_indices);
         //cout << "Size of indices: " << v_indices[box_index].size() << endl;
 
-        //
-        // Give color to the point cloud excerpt
-        //
-
-        if ( configuration.visualizeLabels )
+        if ( !v_indices.empty() )
         {
 
-            pcl::PointCloud<pcl::PointXYZRGB>::Ptr coloredOutputCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+            //
+            // Give color to the point cloud excerpt
+            //
 
-            TPoint3D color;
-
-            if ( configuration.instancesLabeled )
+            if ( configuration.visualizeLabels )
             {
-                string label = getInstanceLabel(box.label);
-                if ( label.size() )
-                    color = m_consideredLabels[label];
+                cropHull.filter(*outputCloud);
+
+                pcl::PointCloud<pcl::PointXYZRGB>::Ptr coloredOutputCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+
+                TPoint3D color;
+
+                if ( configuration.instancesLabeled )
+                {
+                    string label = getInstanceLabel(box.label);
+                    if ( label.size() )
+                        color = m_consideredLabels[label];
+                    else
+                        color = TPoint3D(1,1,1);
+                }
                 else
-                    color = TPoint3D(1,1,1);
+                    color = m_consideredLabels[box.label];
+
+                uint8_t color_r = color.x*255;
+                uint8_t color_g = color.y*255;
+                uint8_t color_b = color.z*255;
+
+                for ( size_t point = 0; point < outputCloud->size(); point++ )
+                {
+                    // Get and set pixel color for the depth img
+
+                    size_t indice = v_indices[point];
+
+                    size_t pixelRow = floor(indice/double(N_cols));
+                    size_t pixelCol = indice % N_cols;
+                    TColor pixelColor(color_r,color_g,color_b);
+                    img.setPixel(pixelRow,pixelCol,pixelColor);
+
+
+                    // Now, for the point cloud
+
+                    pcl::PointXYZRGB coloredPoint(color_r,color_g,color_b);
+                    coloredPoint.x = outputCloud->points[point].x;
+                    coloredPoint.y = outputCloud->points[point].y;
+                    coloredPoint.z = outputCloud->points[point].z;
+
+
+                    coloredOutputCloud->points.push_back(coloredPoint);
+                }
+
+                //viewer->removeAllPointClouds();
+                //viewer->adsetSizedPointCloud( box.convexHullCloud );
+                stringstream ss;
+                ss << "Outputcloud_" << box_index;
+                viewer->addPointCloud( coloredOutputCloud,string(ss.str()) );
             }
-            else
-                color = m_consideredLabels[box.label];
 
-            uint8_t color_r = color.x*255;
-            uint8_t color_g = color.y*255;
-            uint8_t color_b = color.z*255;
+            // Label the observation itself
+            CObservation3DRangeScan::TPixelLabelInfoBase::TMapLabelID2Name &m_insertedLabels
+                    = obs->pixelLabels->pixelLabelNames;
 
-            for ( size_t point = 0; point < outputCloud->size(); point++ )
+            // Check if the label has been already inserted, so it has an index
+            std::map<uint32_t,std::string>::iterator it;
+            int labelIndex = -1;
+
+            for ( it = m_insertedLabels.begin(); it != m_insertedLabels.end(); it++ )
+                if ( it->second == box.label )
+                    labelIndex = it->first;
+
+            // If not, add it to the labels map with a new index
+            if ( labelIndex == -1 )
             {
+                size_t N_labels = m_insertedLabels.size();
+                labelIndex = N_labels+1;
+                obs->pixelLabels->setLabelName(labelIndex,box.label);
+                //cout << "Label " << box.label << " does not exist in the obs";
+                //cout << ", now inserted with id: " << labelIndex << endl;
 
-                pcl::PointXYZRGB coloredPoint(color_r,color_g,color_b);
-                coloredPoint.x = outputCloud->points[point].x;
-                coloredPoint.y = outputCloud->points[point].y;
-                coloredPoint.z = outputCloud->points[point].z;
-
-
-                coloredOutputCloud->points.push_back(coloredPoint);
             }
 
-            //viewer->removeAllPointClouds();
-            //viewer->addPointCloud( box.convexHullCloud );
-            stringstream ss;
-            ss << "Outputcloud_" << box_index;
-            viewer->addPointCloud( coloredOutputCloud,string(ss.str()) );
-        }
+            if ( labelIndex == -1 )
+                continue;
 
+            // iterate over the points indices, and set the pixels into the observation
+            // to the label index
+
+            vector<int>::iterator itIndices;
+            for ( itIndices = v_indices.begin(); itIndices != v_indices.end(); itIndices++ )
+            {
+                int &indice  = *itIndices;
+                size_t pixelRow = floor(indice/double(N_cols));
+                size_t pixelCol = indice % N_cols;
+                //cout << "Setting pixel " << pixelRow << "," << pixelCol;
+                //cout << " with label index " << labelIndex <<  " class " << box.label << endl;
+                obs->pixelLabels->setLabel(pixelRow,pixelCol,labelIndex);
+            }
+        }
     }
 
     // Visualize labeling results
+
     if ( configuration.visualizeLabels )
     {
+        window.showImage(img);
+
         viewer->resetStoppedFlag();
+
         while (!viewer->wasStopped())
             viewer->spinOnce(100);
+
     }
+
+    //cout << "Let's see.... " << endl;
+    //cout << *(obs->pixelLabels) << endl;
+    //mrpt::system::pause();
+
 }
+
 
 //-----------------------------------------------------------
 //
@@ -375,134 +473,168 @@ void labelObs(CObservation3DRangeScanPtr obs,
 
 int main(int argc, char* argv[])
 {
-    // Useful variables
 
-    vector<string> sensors_to_use;
-    CRawlog rawlog;
-    bool stepByStepExecution = false;
-
-    if ( argc > 1 )
+    try
     {
-        // Get configuration file name
 
-        cout << "1:" << argv[1] << endl;
 
-        string configFile = argv[1];
-        loadConfig(configFile);
+        mrpt::utils::registerClass(CLASS_ID(CObservation3DRangeScan));
 
-        // Get optional paramteres
-        if ( argc > 2 )
+        // Useful variables
+
+        vector<string> sensors_to_use;
+        CRawlog rawlog, o_rawlog;
+        bool stepByStepExecution = false;
+        string o_rawlogFile;
+
+        if ( argc > 1 )
         {
-            bool alreadyReset = false;
+            // Get configuration file name
 
-            size_t arg = 2;
+            cout << "1:" << argv[1] << endl;
 
-            while ( arg < argc )
+            string configFile = argv[1];
+            loadConfig(configFile);
+
+            // Get optional paramteres
+            if ( argc > 2 )
             {
-                if ( !strcmp(argv[arg],"-i") )
-                {
-                    configuration.rawlogFile = argv[arg+1];
-                    arg += 2;
-                }
-                if ( !strcmp(argv[arg],"-l") )
-                {
-                    configuration.labelledScene = argv[arg+1];
-                    arg += 2;
-                }
-                else if ( !strcmp(argv[arg],"-sensor") )
-                {
-                    string sensor = argv[arg+1];
-                    sensors_to_use.push_back(  sensor );
-                    arg += 2;
-                }
-                else if ( !strcmp(argv[arg], "-step") )
-                {
-                    stepByStepExecution = true;
-                    arg++;
-                }
-                else
-                {
-                    cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
-                    return -1;
-                }
+                bool alreadyReset = false;
 
+                size_t arg = 2;
+
+                while ( arg < argc )
+                {
+                    if ( !strcmp(argv[arg],"-h") )
+                    {
+                        showUsageInformation();
+                        arg++;
+                    }
+                    if ( !strcmp(argv[arg],"-i") )
+                    {
+                        configuration.rawlogFile = argv[arg+1];
+                        arg += 2;
+                    }
+                    if ( !strcmp(argv[arg],"-l") )
+                    {
+                        configuration.labelledScene = argv[arg+1];
+                        arg += 2;
+                    }
+                    else if ( !strcmp(argv[arg],"-sensor") )
+                    {
+                        string sensor = argv[arg+1];
+                        sensors_to_use.push_back(  sensor );
+                        arg += 2;
+                    }
+                    else if ( !strcmp(argv[arg], "-step") )
+                    {
+                        stepByStepExecution = true;
+                        arg++;
+                    }
+                    else
+                    {
+                        cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
+                        return -1;
+                    }
+
+                }
             }
         }
-    }
-    else
-    {
-        cout << "Usage information. At least one expected arguments: " << endl <<
-                " \t <conf_fil>       : Configuration file." << endl;
-        cout << "Then, optional parameters:" << endl <<
-                " \t -i <rawlog_file> : Rawlog file to process." << endl <<
-                " \t -sensor <sensor_label> : Use obs. from this sensor (none used by default)." << endl <<
-                " \t -step                  : Enable step by step execution." << endl;
+        else
+        {
+            showUsageInformation();
 
+            return -1;
+        }
+
+        if ( sensors_to_use.empty() )
+        {
+            cout << "[Error] no sensors to use have been indicated. " << endl;
+            cout << "        See the app usage for more information (-h)" << endl;
+            return -1;
+        }
+
+        o_rawlogFile = configuration.rawlogFile.substr(0,configuration.rawlogFile.size()-7);
+        o_rawlogFile += "_labeled.rawlog";
+
+        rawlog.loadFromRawLogFile( configuration.rawlogFile );
+
+        cout << "[INFO] Rawlog file   : " << configuration.rawlogFile << " " << rawlog.size() << " obs" << endl;
+        cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
+        loadLabelledScene();
+
+        // Iterate over the obs into the rawlog and show them labeled in the 3D window
+
+        size_t color_index = 0;
+
+        for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
+        {
+            CObservationPtr obs = rawlog.getAsObservation(obs_index);
+
+            // Check if the sensor is being used
+            if ( find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel) == sensors_to_use.end() )
+                continue;
+
+            // Get obs pose
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            CPose3D pose;
+            obs3D->getSensorPose( pose );
+            //cout << "Pose [" << obs_index << "]: " << pose << endl;
+
+            size_t rows = obs3D->cameraParams.nrows;
+            size_t cols = obs3D->cameraParams.ncols;
+
+            // Create per pixel labeling
+            // Label size (0=8 bits, 1=16 bits, 2=32 bits, 3=32 bits, 8=64 bits
+            const unsigned int LABEL_SIZE = 2; // 32 bits
+            obs3D->pixelLabels =  CObservation3DRangeScan::TPixelLabelInfoPtr( new CObservation3DRangeScan::TPixelLabelInfo< LABEL_SIZE >() );
+            obs3D->pixelLabels->setSize(rows,cols);
+
+            pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+
+            obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
+
+            Eigen::Matrix4f transMat;
+
+            transMat(0,0)=0;    transMat(0,1)=-1;     transMat(0,2)=0;    transMat(0,3)=0;
+            transMat(1,0)=0;    transMat(1,1)=0;      transMat(1,2)=+1;   transMat(1,3)=0;
+            transMat(2,0)=1;    transMat(2,1)=0;      transMat(2,2)=0;    transMat(2,3)=0;
+            transMat(3,0)=0;    transMat(3,1)=0;      transMat(3,2)=0;    transMat(3,3)=1;
+
+            pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
+
+            pcl_cloud->height = 240;
+            pcl_cloud->width = 320;
+
+            //
+            // Label observation
+            //
+
+            cout << "Labeling " << obs_index << " of " << rawlog.size() << '\xd';
+            mrpt::system::sleep(100);
+
+            labelObs( obs3D, pcl_cloud, rows, cols );
+
+            o_rawlog.addObservationMemoryReference(obs3D);
+
+        }
+
+        cout << "[INFO] Saving rawlog file to " << o_rawlogFile << endl;
+        o_rawlog.saveToRawLogFile( o_rawlogFile );
+        cout << "[INFO] Done!" << endl;
+
+        return 0;
+
+    } catch (exception &e)
+    {
+        cout << "Exception caught: " << e.what() << endl;
         return -1;
     }
-
-
-
-
-    rawlog.loadFromRawLogFile( configuration.rawlogFile );
-
-    cout << "[INFO] Rawlog file   : " << configuration.rawlogFile << " " << rawlog.size() << " obs" << endl;
-    cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
-    loadLabelledScene();
-
-    // Iterate over the obs into the rawlog and show them labeled in the 3D window
-
-    size_t color_index = 0;
-
-    for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
+    catch (...)
     {
-        CObservationPtr obs = rawlog.getAsObservation(obs_index);
-
-        // Check if the sensor is being used
-        if ( find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel) == sensors_to_use.end() )
-            continue;
-
-        // Get obs pose
-        CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-        obs3D->load();
-
-        CPose3D pose;
-        obs3D->getSensorPose( pose );
-        cout << "Pose [" << obs_index << "]: " << pose << endl;
-
-        // Create per pixel labeling
-        // Label size (0=8 bits, 1=16 bits, 2=32 bits, 3=32 bits, 8=64 bits
-        const unsigned int LABEL_SIZE = 2; // 32 bits
-        obs3D->pixelLabels =  CObservation3DRangeScan::TPixelLabelInfoPtr( new CObservation3DRangeScan::TPixelLabelInfo< LABEL_SIZE >() );
-
-        pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
-
-        obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
-
-        Eigen::Matrix4f transMat;
-
-        transMat(0,0)=0;    transMat(0,1)=-1;     transMat(0,2)=0;    transMat(0,3)=0;
-        transMat(1,0)=0;    transMat(1,1)=0;      transMat(1,2)=+1;   transMat(1,3)=0;
-        transMat(2,0)=1;    transMat(2,1)=0;      transMat(2,2)=0;    transMat(2,3)=0;
-        transMat(3,0)=0;    transMat(3,1)=0;      transMat(3,2)=0;    transMat(3,3)=1;
-
-        pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
-
-        cout << "Number of points in point cloud: " << pcl_cloud->size() << endl;
-        pcl_cloud->height = 240;
-        pcl_cloud->width = 320;
-
-        //
-        // Label observation
-        //
-
-        cout << "[INFO] Labeling observation." << endl;
-
-        labelObs( obs3D, pcl_cloud );
-
+        printf("Another exception!!");
+        return -1;
     }
-
-    mrpt::system::pause();
-
-    return 0;
 }
