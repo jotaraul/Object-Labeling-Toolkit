@@ -549,7 +549,7 @@ int main(int argc, char* argv[])
 
         if ( sensors_to_use.empty() )
         {
-            cout << "[Error] no sensors to use have been indicated. " << endl;
+            cout << "[ERROR] No sensors to use have been indicated. " << endl;
             cout << "        See the app usage for more information (-h)" << endl;
             return -1;
         }
@@ -563,9 +563,9 @@ int main(int argc, char* argv[])
         cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
         loadLabelledScene();
 
-        // Iterate over the obs into the rawlog and show them labeled in the 3D window
-
-        size_t color_index = 0;
+        //
+        // Iterate over the obs into the rawlog labeling them
+        //
 
         for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
         {
@@ -620,6 +620,10 @@ int main(int argc, char* argv[])
             o_rawlog.addObservationMemoryReference(obs3D);
 
         }
+
+        //
+        //  Save labeled observations to a new rawlog file
+        //
 
         cout << "[INFO] Saving rawlog file to " << o_rawlogFile << endl;
         o_rawlog.saveToRawLogFile( o_rawlogFile );

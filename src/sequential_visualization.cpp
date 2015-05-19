@@ -51,22 +51,55 @@ using namespace mrpt;
 using namespace std;
 
 mrpt::gui::CDisplayWindow3D  win3D;
-gui::CDisplayWindowPlots	win("ICP results");
+gui::CDisplayWindowPlots	win("Observations 2D pose");
+
+
+//-----------------------------------------------------------
+//
+//                   showUsageInformation
+//
+//-----------------------------------------------------------
+
+void showUsageInformation()
+{
+    cout << "Usage information. At least one expected argument: " << endl <<
+            " \t (1) Rawlog file." << endl;
+
+    cout << "Then, optional parameters:" << endl <<
+            " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
+            " \t -step                  : Enable step by step execution." << endl <<
+            " \t -clear                 : Clear the scene after a step." << endl <<
+            " \t -poses                 : Show spheres in the scene representing observation poses." << endl <<
+            " \t -zUpperLimit           : Remove points with a height higher than this paramter." << endl <<
+            " \t -limit                 : Sets a limit to the number of obs to process." <<
+            " \t -lowerLimit            : Sets a lower limit to the number of obs to process." << endl;
+}
+
+
+
+
+//-----------------------------------------------------------
+//
+//                        main
+//
+//-----------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
+    //
+    //  Useful variables
+    //
+
+    CRawlog         rawlog; // Input rawlog
+    string          rawlogFile; // Rawlog name
+    vector<string>  sensors_to_use; // Visualize data from this sensors. Empty=all
 
     bool stepByStepExecution = false;
     bool clearAfterStep = false;
     bool showPoses = false;
+    double zUpperLimit = std::numeric_limits<double>::max();
 
-    // Set 3D window
-
-    vector<string> sensors_to_use;
-    sensors_to_use.push_back("RGBD_1");
-    sensors_to_use.push_back("RGBD_2");
-    sensors_to_use.push_back("RGBD_3");
-    sensors_to_use.push_back("RGBD_4");
+    // Set 3D window    
 
     win3D.setWindowTitle("Sequential visualization");
 
@@ -94,8 +127,9 @@ int main(int argc, char* argv[])
 
     win.hold_on();
 
-    CRawlog rawlog;    
-    string rawlogFile;
+    //
+    // Load configuration params
+    //
 
     if ( argc > 1 )
     {
@@ -105,24 +139,21 @@ int main(int argc, char* argv[])
         // Get optional paramteres
         if ( argc > 2 )
         {
-            bool alreadyReset = false;
-
             size_t arg = 2;
 
             while ( arg < argc )
             {
-                if ( !strcmp(argv[arg],"-sensor") )
+                if ( !strcmp(argv[arg], "-h") )
+                {
+                    showUsageInformation();
+                    arg++;
+                }
+                else if ( !strcmp(argv[arg],"-sensor") )
                 {
                     string sensor = argv[arg+1];
                     arg += 2;
 
-                    if ( !alreadyReset )
-                    {
-                        sensors_to_use.clear();
-                        alreadyReset = true;
-                    }
-
-                    sensors_to_use.push_back(  sensor );
+                    sensors_to_use.push_back( sensor );
 
                 }
                 else if ( !strcmp(argv[arg], "-step") )
@@ -151,29 +182,40 @@ int main(int argc, char* argv[])
                     N_lowerLimitOfObs = atoi(argv[arg+1]);
                     arg += 2;
                 }
+                else if ( !strcmp(argv[arg],"-zUpperLimit") )
+                {
+                    zUpperLimit = atoi(argv[arg+1]);
+                    arg += 2;
+                }
 
                 else
                 {
-                    cout << "[Error] " << argv[arg] << "unknown paramter" << endl;
+                    cout << "[Error] " << argv[arg] << " unknown paramter." << endl;
                     return -1;
                 }
-
             }
         }
     }
     else
     {
-        cout << "Usage information. At least one expected argument: " << endl <<
-                " \t (1) Rawlog file." << endl;
-        cout << "Then, optional parameters:" << endl <<
-                " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
-                " \t -step                  : Enable step by step execution." << endl <<
-                " \t -clear                 : Clear the scene after a step." << endl <<
-                " \t -limit                 : Sets a limit to the number of obs to process." <<
-                " \t -lowerLimit            : Sets a lower limit to the number of obs to process." << endl;
+        showUsageInformation();
 
         return -1;
     }
+
+    if ( sensors_to_use.empty() )
+        cout << "[INFO] Considering observations from any sensor." << endl;
+    else
+    {
+        cout << "[INFO] Considering observations from: ";
+        for ( size_t i_sensor = 0; i_sensor < sensors_to_use.size(); i_sensor++ )
+            cout << sensors_to_use[i_sensor] << " ";
+        cout << endl;
+    }
+
+    //
+    //  Load rawlog file
+    //
 
     cout << "[INFO] Loading rawlog file: " << rawlogFile << endl;
 
@@ -189,15 +231,31 @@ int main(int argc, char* argv[])
     if ( !setNumberOfObs )
         N_limitOfObs = rawlog.size();
 
+    //
     // Iterate over the obs into the rawlog and show them in the 3D/2D windows
+    //
+
+    cout << "[INFO] Showing observations from " << N_lowerLimitOfObs;
+    cout << " up to " << N_limitOfObs << endl;
 
     for ( size_t obs_index = N_lowerLimitOfObs; obs_index < N_limitOfObs; obs_index++ )
     {
         CObservationPtr obs = rawlog.getAsObservation(obs_index);
 
-        if ( find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel) == sensors_to_use.end() )
+        // Using information from this sensor?
+        if ( !sensors_to_use.empty()
+             && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
+                 == sensors_to_use.end() )
             continue;
 
+        CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+        obs3D->load();
+
+        CPose3D pose;
+        obs3D->getSensorPose( pose );
+        cout << "Pose: " << obs_index << " " << pose << endl;
+
+        // Clear previous point clouds?
         if ( clearAfterStep )
         {
             size_t index = std::distance(sensors_to_use.begin(),
@@ -213,20 +271,7 @@ int main(int argc, char* argv[])
 
         }
 
-        CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-        obs3D->load();
-
-        /*CMatrixFloat mat;
-        obs3D->intensityImage.getAsMatrix(mat);
-
-        cout << mat;*/
-
-        //scene->removeObject()
-
-        CPose3D pose;
-        obs3D->getSensorPose( pose );
-        cout << "Pose: " << obs_index << " " << pose << endl;
-
+        // Plot sensor pose into the 2D window
         CVectorDouble coords,x,y;
         pose.getAsVector( coords );
         x.push_back( coords[0] );
@@ -234,6 +279,7 @@ int main(int argc, char* argv[])
         CPoint3D point((double)coords[0], (double)coords[1], (double)coords[2]);
         win.plot(x,y,"b.4");
 
+        // Plot point cloud into the 3D window
         mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
 
         mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
@@ -247,17 +293,20 @@ int main(int argc, char* argv[])
 
         gl_points->loadFromPointsMap( &colouredMap );
 
-        mrpt::opengl::CSpherePtr sphere = mrpt::opengl::CSphere::Create(0.02);
-        sphere->setPose(point);
-
+        // Remove points with a z higher than a given one
         for ( size_t i = 0; i < N_points; i++ )
-            if ( gl_points->getPointf(i).z > 2 )
+            if ( gl_points->getPointf(i).z > zUpperLimit )
                 gl_points->setPoint_fast(i,0,0,0);
 
         scene->insert( gl_points );
 
+        // Show spheres representing the observation poses?
         if ( showPoses )
+        {
+            mrpt::opengl::CSpherePtr sphere = mrpt::opengl::CSphere::Create(0.02);
+            sphere->setPose(point);
             scene->insert( sphere );
+        }
 
         if ( clearAfterStep )
             v_obsInserted.push_back( gl_points );
@@ -274,12 +323,13 @@ int main(int argc, char* argv[])
 
     cout << "[INFO] Number of points clouds in the scene: " << N_inserted_point_clouds << endl;
 
+    //
+    // Save the resultant scene to file
+    //
+
     cout << "[INFO] Saving to scene file " << sceneFile;
     scene->saveToFile( sceneFile );
     cout << " ... done" << endl;
-
-    win.hold_off();
-    win.waitForKey();
 
     mrpt::system::pause();
 
