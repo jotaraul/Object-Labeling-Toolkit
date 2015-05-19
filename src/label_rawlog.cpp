@@ -116,7 +116,7 @@ cout << "Usage information. At least one expected arguments: " << endl <<
 cout << "Then, optional parameters:" << endl <<
         " \t -h                     : This help." << endl <<
         " \t -i <rawlog_file>       : Rawlog file to process." << endl <<
-        " \t -sensor <sensor_label> : Use obs. from this sensor (none used by default)." << endl <<
+        " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
         " \t -step                  : Enable step by step execution." << endl;
 }
 
@@ -500,8 +500,6 @@ int main(int argc, char* argv[])
             // Get optional paramteres
             if ( argc > 2 )
             {
-                bool alreadyReset = false;
-
                 size_t arg = 2;
 
                 while ( arg < argc )
@@ -549,10 +547,13 @@ int main(int argc, char* argv[])
         }
 
         if ( sensors_to_use.empty() )
+            cout << "[INFO] Considering observations from any sensor." << endl;
+        else
         {
-            cout << "[ERROR] No sensors to use have been indicated. " << endl;
-            cout << "        See the app usage for more information (-h)" << endl;
-            return -1;
+            cout << "[INFO] Considering observations from: ";
+            for ( size_t i_sensor = 0; i_sensor < sensors_to_use.size(); i_sensor++ )
+                cout << sensors_to_use[i_sensor] << " ";
+            cout << endl;
         }
 
         o_rawlogFile = configuration.rawlogFile.substr(0,configuration.rawlogFile.size()-7);
@@ -560,7 +561,8 @@ int main(int argc, char* argv[])
 
         rawlog.loadFromRawLogFile( configuration.rawlogFile );
 
-        cout << "[INFO] Rawlog file   : " << configuration.rawlogFile << " " << rawlog.size() << " obs" << endl;
+        cout << "[INFO] Rawlog file   : " << configuration.rawlogFile;
+        cout << " with " << rawlog.size() << " obs" << endl;
         cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
         loadLabelledScene();
 
@@ -576,7 +578,9 @@ int main(int argc, char* argv[])
             CObservationPtr obs = rawlog.getAsObservation(obs_index);
 
             // Check if the sensor is being used
-            if ( find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel) == sensors_to_use.end() )
+            if ( !sensors_to_use.empty()
+                 && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
+                     == sensors_to_use.end() )
                 continue;
 
             // Get obs pose
