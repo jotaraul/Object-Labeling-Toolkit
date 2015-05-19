@@ -243,6 +243,10 @@ int main(int argc, char* argv[])
         {
             CObservationPtr obs = rawlog.getAsObservation(obs_index);
 
+            // Check that it is a 3D observation
+            if ( !IS_CLASS(obs, CObservation3DRangeScan) )
+                continue;
+
             // Using information from this sensor?
             if ( !sensors_to_use.empty()
                  && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
