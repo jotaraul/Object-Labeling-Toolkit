@@ -16,7 +16,10 @@ This project is structured as follows:
     * *Process_rawlog*: Sets the extrinsic and intrinsic parameters of the sensors used within the dataset.
     * *Localization*: Localizes the poses/locations from which the observations within the datset were taken.
     * *Sequential_visualization*: Visually shows a 3D reconstruction of the collected data, and stores it as a _scene_.
-    * *Label_scene*: Permits us to effortlessly label a reconstructed scene.
+    * *Label_scene*: Permits us to effortlessly label a reconstructed scene. Example of scene being labeled:
+    
+        ![Scene being labeled with the OLT tool](http://mapir.isa.uma.es/jotaraul/Resources/example_scene.png "Scene being labeled with the OLT tool")
+
     * *Label_rawlog*: Propagates the annotated labels in a scene to each observation within the dataset.
     * *Create_video & Segmentation*: Experimental applications under development.
 * _Examples of configuration files_: A directoy containing some examples of configuration files to be used with the different toolkit applications.
