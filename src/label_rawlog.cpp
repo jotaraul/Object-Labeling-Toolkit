@@ -100,8 +100,7 @@ map<string,TPoint3D>    m_consideredLabels; // Map <label,color>
 vector<string>          v_appearingLabels;
 
 typedef boost::shared_ptr<pcl::visualization::PCLVisualizer> pclWindow;
-
-mrpt::gui::CDisplayWindow window("Labeled depth img");
+mrpt::gui::CDisplayWindowPtr window;
 
 
 //-----------------------------------------------------------
@@ -308,6 +307,8 @@ void labelObs(CObservation3DRangeScanPtr obs,
 
     if ( configuration.visualizeLabels )
     {
+        window = mrpt::gui::CDisplayWindowPtr( new mrpt::gui::CDisplayWindow("Labeled depth img"));
+
         viewer = pclWindow(new pcl::visualization::PCLVisualizer ("3D Viewer"));
         viewer->initCameraParameters ();
 
@@ -449,7 +450,7 @@ void labelObs(CObservation3DRangeScanPtr obs,
 
     if ( configuration.visualizeLabels )
     {
-        window.showImage(img);
+        window->showImage(img);
 
         viewer->resetStoppedFlag();
 
@@ -562,6 +563,9 @@ int main(int argc, char* argv[])
         cout << "[INFO] Rawlog file   : " << configuration.rawlogFile << " " << rawlog.size() << " obs" << endl;
         cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
         loadLabelledScene();
+
+        if ( configuration.visualizeLabels )
+            window = mrpt::gui::CDisplayWindowPtr( new mrpt::gui::CDisplayWindow("Labeled depth img"));
 
         //
         // Iterate over the obs into the rawlog labeling them
