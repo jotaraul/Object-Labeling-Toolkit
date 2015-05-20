@@ -77,6 +77,23 @@ mrpt::gui::CDisplayWindow3D  win3D; // Window to visually perform the labeling
 
 //-----------------------------------------------------------
 //
+//                   showUsageInformation
+//
+//-----------------------------------------------------------
+
+void showUsageInformation()
+{
+    cout << "Usage information. At least one expected argument: " << endl <<
+            " \t <conf_fil>       : Configuration file." << endl;
+    cout << "Then, optional parameters:" << endl <<
+            " \t -h                     : This help." << endl <<
+            " \t -scene <scene_file>    : Scene file to be labeled/edited." << endl <<
+            " \t -showOnlyLabels        : Show only labels (boxes)." << endl;
+}
+
+
+//-----------------------------------------------------------
+//
 //                      loadConfig
 //
 //-----------------------------------------------------------
@@ -98,8 +115,6 @@ void loadConfig( string const configFile )
 
     size_t magicNumber = ceil(pow(v_labelNames.size(),1.0/3.0));
 
-    cout << "Magic number: " << magicNumber << endl;
-
     vector<TPoint3D> v_colors;
 
     for ( double r = 0; r < magicNumber; r+= 1 )
@@ -116,9 +131,7 @@ void loadConfig( string const configFile )
     cout << "[INFO] " << m_labelColors.size() << " labels considered." << endl;
 
 //    cout << "[INFO] Loaded labels: " << endl;
-
 //    map<string,TPoint3D>::iterator it;
-
 //    for ( it = m_labelColors.begin(); it != m_labelColors.end(); it++ )
 //        cout << " - " << it->first << ", with color " << it->second << endl;
 
@@ -381,7 +394,7 @@ int main(int argc, char* argv[])
     double &OFFSET = configuration.OFFSET;
     double &OFFSET_ANGLES = configuration.OFFSET_ANGLES;
 
-    // Set input scene
+    // Load configuration
 
     if ( argc > 1 )
     {
@@ -394,6 +407,11 @@ int main(int argc, char* argv[])
 
             while ( arg < argc )
             {
+                if ( !strcmp(argv[arg],"-h") )
+                {
+                    showUsageInformation();
+                    return 0;
+                }
                 if ( !strcmp(argv[arg],"-showOnlyLabels") )
                 {
                     configuration.showOnlyLabels = true;
@@ -404,18 +422,23 @@ int main(int argc, char* argv[])
                     configuration.sceneFile = argv[arg+1];
                     arg = arg+2;
                 }
+                else
+                {
+                    cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
+                    return -1;
+                }
             }
         }
     }
-
     else
     {
-        cout << "Usage information. One expected argument: " << endl <<
-                " \t (1) Scene to be labelled / to edit labelling." << endl;
+        showUsageInformation();
         return -1;
     }
 
+    //
     // Set 3D window
+    //
 
     win3D.setWindowTitle("Scene labelling");
 
@@ -478,6 +501,10 @@ int main(int argc, char* argv[])
         sceneFileToSave = configuration.sceneFile.substr(0,configuration.sceneFile.size()-6)
                             + "_labelled.scene";
     }
+
+    //
+    // Check if the user wants to only visualize labels
+    //
 
     if ( configuration.showOnlyLabels )
     {
@@ -687,7 +714,7 @@ int main(int argc, char* argv[])
                 switch ( key )
                 {
 
-                // Control the "amount" of size and angles increment
+                // Control the "amount" of size and angles increment/decrement
                 case ( 'r' ):
                 {
                     OFFSET = 0.02;
@@ -710,7 +737,7 @@ int main(int argc, char* argv[])
                     break;
                 }
 
-                    // SIZE
+                // SIZE
 
                 case ( MRPTK_LEFT ) : // y axis left
                 {
@@ -871,15 +898,6 @@ int main(int argc, char* argv[])
 
                     label->setString( boxLabel );
                     label->setScale(0.06);
-
-
-                    /*for ( it = m_labelColors.begin(); it != m_labelColors.end(); it++ )
-                        if ( boxLabel.find( it->first ) != string::npos )
-                        {
-                            label->setColor( it->second.x, it->second.y, it->second.z );
-                            box->setWireframe(false);
-                            box->setColor( it->second.x, it->second.y, it->second.z, 0.4);
-                        }*/
 
                     box->setName(boxLabel);
 

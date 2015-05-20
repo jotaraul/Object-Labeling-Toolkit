@@ -111,13 +111,13 @@ mrpt::gui::CDisplayWindowPtr window;
 
 void showUsageInformation()
 {
-cout << "Usage information. At least one expected arguments: " << endl <<
-        " \t <conf_fil>       : Configuration file." << endl;
-cout << "Then, optional parameters:" << endl <<
-        " \t -h                     : This help." << endl <<
-        " \t -i <rawlog_file>       : Rawlog file to process." << endl <<
-        " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
-        " \t -step                  : Enable step by step execution." << endl;
+    cout << "Usage information. At least one expected argument: " << endl <<
+            " \t <conf_fil>       : Configuration file." << endl;
+    cout << "Then, optional parameters:" << endl <<
+            " \t -h                     : This help." << endl <<
+            " \t -i <rawlog_file>       : Rawlog file to process." << endl <<
+            " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
+            " \t -step                  : Enable step by step execution." << endl;
 }
 
 
@@ -143,8 +143,6 @@ void loadConfig( string const configFile )
     config.read_vector("LABELS","labelNames",vector<string>(0),v_labelNames,true);
 
     size_t magicNumber = ceil(pow(v_labelNames.size(),1.0/3.0));
-
-    cout << "Magic number: " << magicNumber << endl;
 
     vector<TPoint3D> v_colors;
 
