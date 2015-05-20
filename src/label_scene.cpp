@@ -22,7 +22,7 @@
 
 #include <mrpt/gui.h>
 #include <mrpt/maps/CColouredPointsMap.h>
-
+#include <mrpt/utils/CConfigFile.h>
 #include <mrpt/math.h>
 #include <mrpt/obs/CObservation3DRangeScan.h>
 #include <mrpt/opengl.h>
@@ -41,24 +41,34 @@ using namespace std;
 // GLOBAL VBLES/CONSTANTS
 //
 
-mrpt::gui::CDisplayWindow3D  win3D;
+struct TConfiguration
+{
+    double OFFSET;
+    double OFFSET_ANGLES;
+    string sceneFile;
 
-double OFFSET = 0.02;
-double OFFSET_ANGLES = 0.02;
-size_t visualization_mode = 0;
-size_t N_visualization_modes = 7;
+    bool showOnlyLabels;
 
-map< string, TPoint3D > m_labelColors;
 
-enum TState{ IDLE, EDITING } STATE;
+    TConfiguration() : OFFSET(0.02), OFFSET_ANGLES(0.02), showOnlyLabels(false)
+    {}
+};
 
-string sceneFile;
-string sceneFileToSave;
+TConfiguration configuration;
 
-// Vector to keep track of the boxes within the scene
-vector<CBoxPtr> v_boxes;
-vector<CText3DPtr> v_labels;
+size_t visualization_mode = 0;      // Initial visualization mode
+size_t N_visualization_modes = 7;   // Number of visualization modes
 
+enum TState{ IDLE, EDITING } STATE; // State of the labeling
+
+string sceneFileToSave; // Where to save the labeled sceneFile
+
+map<string,TPoint3D> m_labelColors; // A map <label,color> to fill the boxes
+
+vector<CBoxPtr> v_boxes;    // Keep track of the boxes within the scene
+vector<CText3DPtr> v_labels;// Keep track of the labels of the boxes within the scene
+
+mrpt::gui::CDisplayWindow3D  win3D; // Window to visually perform the labeling
 
 //
 // AUXILIAR FUNCTIONS
@@ -66,7 +76,61 @@ vector<CText3DPtr> v_labels;
 
 
 //-----------------------------------------------------------
+//
+//                      loadConfig
+//
+//-----------------------------------------------------------
+
+void loadConfig( string const configFile )
+{
+    CConfigFile config( configFile );
+
+    // Load general configuration
+
+    configuration.showOnlyLabels = config.read_bool("GENERAL","showOnlyLabels",0,true);
+    configuration.sceneFile      = config.read_string("GENERAL","sceneFile","",true);
+
+
+    // Load object labels (classes) to be considered
+
+    vector<string> v_labelNames;
+    config.read_vector("LABELS","labelNames",vector<string>(0),v_labelNames,true);
+
+    size_t magicNumber = ceil(pow(v_labelNames.size(),1.0/3.0));
+
+    cout << "Magic number: " << magicNumber << endl;
+
+    vector<TPoint3D> v_colors;
+
+    for ( double r = 0; r < magicNumber; r+= 1 )
+        for ( double g = 0; g < magicNumber; g+= 1 )
+            for ( double b = 0; b < magicNumber; b+= 1 )
+                v_colors.push_back(TPoint3D(1.0*(1-r/(magicNumber-1)),
+                                            1.0*(1-g/(magicNumber-1)),
+                                            1.0*(1-b/(magicNumber-1))));
+
+
+    for ( size_t i_label = 0; i_label < v_labelNames.size(); i_label++ )
+        m_labelColors[v_labelNames[i_label]] = v_colors[i_label];
+
+    cout << "[INFO] " << m_labelColors.size() << " labels considered." << endl;
+
+//    cout << "[INFO] Loaded labels: " << endl;
+
+//    map<string,TPoint3D>::iterator it;
+
+//    for ( it = m_labelColors.begin(); it != m_labelColors.end(); it++ )
+//        cout << " - " << it->first << ", with color " << it->second << endl;
+
+    cout << "[INFO] Configuration successfully loaded." << endl;
+
+}
+
+
+//-----------------------------------------------------------
+//
 //                        getColor
+//
 //-----------------------------------------------------------
 
 TPoint3D getColor( const string label )
@@ -82,7 +146,9 @@ TPoint3D getColor( const string label )
 
 
 //-----------------------------------------------------------
+//
 //                  changeBoxesVisualization
+//
 //-----------------------------------------------------------
 
 void changeBoxesVisualization()
@@ -153,7 +219,9 @@ void changeBoxesVisualization()
 
 
 //-----------------------------------------------------------
+//
 //                      sortCorners
+//
 //-----------------------------------------------------------
 
 void sortCorners( const vector<TPoint3D> &toSort, vector<TPoint3D> &sorted, const char axis )
@@ -183,12 +251,14 @@ void sortCorners( const vector<TPoint3D> &toSort, vector<TPoint3D> &sorted, cons
 
 
 //-----------------------------------------------------------
+//
 //                changeUnderlyingPointCloud
+//
 //-----------------------------------------------------------
 
 void changeUnderlyingPointCloud()
 {
-
+    string &sceneFile = configuration.sceneFile;
     string newSceneFile;
 
     cout << "Insert the new scene file. It has to be one not previously labeled: ";
@@ -208,9 +278,9 @@ void changeUnderlyingPointCloud()
 
     if ( ( newSceneFile.compare(newSceneFile.size()-15,15,"_labelled.scene") )
          && sceneBis.loadFromFile(newSceneFile) )
-    {
-        cout << " valid :)" << endl,
-                sceneFile = newSceneFile;
+    {        
+        cout << " valid :)" << endl;
+        sceneFile = newSceneFile;
         sceneFileToSave = sceneFile.substr(0,sceneFile.size()-6) + "_labelled.scene";
     }
     else
@@ -247,7 +317,9 @@ void changeUnderlyingPointCloud()
 
 
 //-----------------------------------------------------------
+//
 //                      showIDLEMenu
+//
 //-----------------------------------------------------------
 
 void showIDLEMenu()
@@ -260,7 +332,9 @@ void showIDLEMenu()
 
 
 //-----------------------------------------------------------
+//
 //                      showEDITINGMenu
+//
 //-----------------------------------------------------------
 
 void showEDITINGMenu()
@@ -273,87 +347,46 @@ void showEDITINGMenu()
 
 
 //-----------------------------------------------------------
-//                      changeToIDLE
+//
+//                      changeState
+//
 //-----------------------------------------------------------
 
-void changeToIDLE()
+void changeState(const TState newState)
 {
-    STATE = IDLE;
-    showIDLEMenu();
+    if ( newState == IDLE )
+    {
+        STATE = IDLE;
+        showIDLEMenu();
+    }
+    else if ( newState == EDITING )
+    {
+        STATE = EDITING;
+        showEDITINGMenu();
+    }
+
     win3D.forceRepaint();
+
 }
 
 
 //-----------------------------------------------------------
-//                      changeToEDITING
-//-----------------------------------------------------------
-
-void changeToEDITING()
-{
-    STATE = EDITING;
-    showEDITINGMenu();
-    win3D.forceRepaint();
-}
-
-
-//-----------------------------------------------------------
+//
 //                           main
+//
 //-----------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
-
-    bool showOnlyLabels = false;
-
-    m_labelColors["floor"] =    TPoint3D(1.0*0.8, 1.0*0.4, 1.0*0.0);
-    m_labelColors["ceiling"] =  TPoint3D(1.0*0.0, 1.0*0.0, 1.0*0.2);
-    m_labelColors["bed"] =      TPoint3D(1.0*0.0, 1.0*0.2, 1.0*0.0);
-    m_labelColors["lamp"] =     TPoint3D(1.0*0.0, 1.0*0.2, 1.0*0.2);
-    m_labelColors["table"] =    TPoint3D(1.0*0.2, 1.0*0.0, 1.0*0.0);
-    m_labelColors["chair"] =    TPoint3D(1.0*0.2, 1.0*0.0, 1.0*0.2);
-    m_labelColors["night_stand"] = TPoint3D(1.0*0.2, 1.0*0.2, 1.0*0.0);
-    m_labelColors["pillow"] =   TPoint3D(1.0*0.2, 1.0*0.2, 1.0*0.2);
-    m_labelColors["wall"] =     TPoint3D(1.0*0.0, 1.0*0.0, 1.0*0.4);
-    m_labelColors["computer_screen"] = TPoint3D(1.0*0.0, 1.0*0.4, 1.0*0.0);
-    m_labelColors["pc"] =       TPoint3D(1.0*0.0, 1.0*0.4, 1.0*0.4);
-    m_labelColors["keyboard"] = TPoint3D(1.0*0.4, 1.0*0.0, 1.0*0.0);
-    m_labelColors["door"] =     TPoint3D(1.0*0.4, 1.0*0.0, 1.0*0.4);
-    m_labelColors["shelf"] =    TPoint3D(1.0*0.4, 1.0*0.4, 1.0*0.0);
-    m_labelColors["shelves"] =  TPoint3D(1.0*0.4, 1.0*0.4, 1.0*0.4);
-    m_labelColors["book"] =     TPoint3D(1.0*0.0, 1.0*0.0, 1.0*0.8);
-    m_labelColors["mouse"] =    TPoint3D(1.0*0.0, 1.0*0.8, 1.0*0.0);
-    m_labelColors["window"] =   TPoint3D(1.0*0.0, 1.0*0.8, 1.0*0.8);
-    m_labelColors["curtain"] =  TPoint3D(1.0*0.8, 1.0*0.0, 1.0*0.0);
-    m_labelColors["clutter"] =  TPoint3D(1.0*0.8, 1.0*0.0, 1.0*0.8);
-    m_labelColors["closet"] =   TPoint3D(1.0*0.8, 1.0*0.8, 1.0*0.0);
-    m_labelColors["clock_alarm"] = TPoint3D(1.0*0.8, 1.0*0.8, 1.0*0.8);
-    m_labelColors["lamp"] =    TPoint3D(1.0*0.0, 1.0*0.0, 1.0*1.0);
-    m_labelColors["picture"] =    TPoint3D(1.0*0.0, 1.0*1.0, 1.0*0.0);
-    m_labelColors["computer"] =    TPoint3D(1.0*0.0, 1.0*1.0, 1.0*1.0);
-    m_labelColors["shoes"] =    TPoint3D(1.0*1.0, 1.0*0.0, 1.0*0.2);
-
-    m_labelColors["fridge"] =    TPoint3D(1.0*0.0, 1.0*0.5, 1.0*0.5);
-    m_labelColors["oven"] =     TPoint3D(1.0*0.5, 1.0*0.5, 1.0*0.0);
-    m_labelColors["cabinet"] =  TPoint3D(1.0*0.5, 1.0*0.0, 1.0*0.5);
-    m_labelColors["counter"] =  TPoint3D(1.0*0.5, 1.0*0.5, 1.0*0.5);
-    m_labelColors["paper_roll"] = TPoint3D(1.0*0.0, 1.0*0.7, 1.0*0.7);
-    m_labelColors["pot"] =      TPoint3D(1.0*0.7, 1.0*0.7, 1.0*0.0);
-    m_labelColors["microwave"] =  TPoint3D(1.0*0.8, 1.0*0.15, 1.0*0.5);
-    m_labelColors["bowl"] =     TPoint3D(1.0*0.0, 1.0*0.3, 1.0*0.3);
-    m_labelColors["milk_bottle"] =TPoint3D(1.0*0.3, 1.0*0.0, 1.0*0.3);
-    m_labelColors["cereal_box"] = TPoint3D(1.0*0.3, 1.0*0.3, 1.0*0.0);
-    m_labelColors["scourer"] =    TPoint3D(1.0*0.9, 1.0*0.3, 1.0*0.3);
-    m_labelColors["faucet"] =   TPoint3D(1.0*0.0, 1.0*0.7, 1.0*0.3);
-    m_labelColors["sink"] =     TPoint3D(1.0*0.7, 1.0*0.0, 1.0*0.3);
-    m_labelColors["stove"] =     TPoint3D(1.0*0.7, 1.0*0.3, 1.0*0.0);
-    m_labelColors["trash_bin"] =     TPoint3D(1.0*0.15, 1.0*0.7, 1.0*0.15);
-    m_labelColors["door"] =     TPoint3D(1.0*0.15, 1.0*0.3, 1.0*0.8);
+    double &OFFSET = configuration.OFFSET;
+    double &OFFSET_ANGLES = configuration.OFFSET_ANGLES;
 
     // Set input scene
 
     if ( argc > 1 )
     {
-        sceneFile = argv[1];
+        string configFile = argv[1];
+        loadConfig(configFile);
 
         if ( argc > 2 )
         {
@@ -363,8 +396,13 @@ int main(int argc, char* argv[])
             {
                 if ( !strcmp(argv[arg],"-showOnlyLabels") )
                 {
-                    showOnlyLabels = true;
+                    configuration.showOnlyLabels = true;
                     arg++;
+                }
+                else if ( !strcmp(argv[arg],"-scene") )
+                {
+                    configuration.sceneFile = argv[arg+1];
+                    arg = arg+2;
                 }
             }
         }
@@ -395,10 +433,10 @@ int main(int argc, char* argv[])
     obj->setLocation(0,0,0);
     scene->insert( obj );
 
-    if (scene->loadFromFile(sceneFile))
-        cout << "[INFO] Scene " << sceneFile << " loaded" << endl;
+    if (scene->loadFromFile(configuration.sceneFile))
+        cout << "[INFO] Scene " << configuration.sceneFile << " loaded" << endl;
     else
-        cout << "[INFO] Error while loading scene " << sceneFile << endl;
+        cout << "[INFO] Error while loading scene " << configuration.sceneFile << endl;
 
     win3D.unlockAccess3DScene();
     win3D.repaint();
@@ -407,7 +445,7 @@ int main(int argc, char* argv[])
     // Already labelled scene?
     //
 
-    if ( !sceneFile.compare(sceneFile.size()-15,15,"_labelled.scene") )
+    if ( !configuration.sceneFile.compare(configuration.sceneFile.size()-15,15,"_labelled.scene") )
     {
         cout << "[INFO] Scene previously labelled. Loading labels... ";
 
@@ -432,15 +470,16 @@ int main(int argc, char* argv[])
         }
 
         cout << v_boxes.size() <<  " boxes loaded " << endl;
-        sceneFileToSave = sceneFile;
+        sceneFileToSave = configuration.sceneFile;
     }
     else
     {
         cout << "[INFO] Scene not previously labelled. Press 'n' to start labelling." << endl;
-        sceneFileToSave = sceneFile.substr(0,sceneFile.size()-6) + "_labelled.scene";
+        sceneFileToSave = configuration.sceneFile.substr(0,configuration.sceneFile.size()-6)
+                            + "_labelled.scene";
     }
 
-    if ( showOnlyLabels )
+    if ( configuration.showOnlyLabels )
     {
         scene = win3D.get3DSceneAndLock();
         scene->clear();
@@ -461,7 +500,7 @@ int main(int argc, char* argv[])
 
     size_t box_editing = 0;
 
-    changeToIDLE();
+    changeState(IDLE);
 
     //
     // MAIN CONTROL LOOP
@@ -524,7 +563,7 @@ int main(int argc, char* argv[])
                     v_boxes.push_back( box );
                     v_labels.push_back( text );
 
-                    changeToEDITING();
+                    changeState(EDITING);
                     box_editing = v_boxes.size()-1;
 
                     cout << "[INFO] Inserted new box to edit" << endl;
@@ -554,7 +593,7 @@ int main(int argc, char* argv[])
                     if ( box_index >= 0 && box_index < v_boxes.size() )
                     {
                         box_editing = box_index;
-                        changeToEDITING();
+                        changeState(EDITING);
                         cout << "[INFO] editin box with index " << box_editing << endl;
                     }
                     else
@@ -854,7 +893,7 @@ int main(int argc, char* argv[])
                 }
                 case ( MRPTK_RETURN ): // Finished editing
                 {
-                    changeToIDLE();
+                    changeState(IDLE);
                     cout << "[INFO] Finished editing box. IDLE state." << endl;
                     break;
                 }
