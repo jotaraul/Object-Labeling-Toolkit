@@ -109,9 +109,9 @@ gui::CDisplayWindowPlots	win("ICP results");
 
 ofstream trajectoryFile("trajectory.txt",ios::trunc);
 
-CDisplayWindow3D window("ICP-3D demo: scene",500,500);
-CDisplayWindow3D window2("ICP-3D demo: UNALIGNED scans",500,500);
-CDisplayWindow3D window3("ICP-3D demo: ICP-ALIGNED scans",500,500);
+CDisplayWindow3DPtr window;
+CDisplayWindow3DPtr window2;
+CDisplayWindow3DPtr window3;
 
 //Increase this values to get more precision. It will also increase run time.
 const size_t HOW_MANY_YAWS=360;
@@ -147,7 +147,9 @@ vector< double > v_goodness;
 
 
 //-----------------------------------------------------------
-//                      smoothing
+//
+//                      smoothObs
+//
 //-----------------------------------------------------------
 
 void smoothObs( CObservation3DRangeScanPtr obsToSmooth )
@@ -200,7 +202,9 @@ void smoothObs( CObservation3DRangeScanPtr obsToSmooth )
 }
 
 //-----------------------------------------------------------
+//
 //                      isKeyPose
+//
 //-----------------------------------------------------------
 
 bool isKeyPose( CPose3D &pose, CPose3D &lastPose)
@@ -227,8 +231,11 @@ bool isKeyPose( CPose3D &pose, CPose3D &lastPose)
         return false;
 }
 
+
 //-----------------------------------------------------------
+//
 //                      trajectoryICP2D
+//
 //-----------------------------------------------------------
 
 void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog,
@@ -335,7 +342,9 @@ void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog,
 
 
 //-----------------------------------------------------------
+//
 //                 processPending3DRangeScans
+//
 //-----------------------------------------------------------
 
 void processPending3DRangeScans()
@@ -410,7 +419,9 @@ void processPending3DRangeScans()
 
 
 //-----------------------------------------------------------
-//                      refineLocationPCL
+//
+//                   refineLocationGICP3D
+//
 //-----------------------------------------------------------
 
 void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_obs2 )
@@ -589,11 +600,14 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
     //cout << "Location set done" << endl;
 }
 
+
 //-----------------------------------------------------------
-//                      refineLocationPCL
+//
+//                refineLocationGICP3DBis
+//
 //-----------------------------------------------------------
 
-void refineLocationPCLBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservation3DRangeScanPtr> &v_obs2 )
+void refineLocationGICP3DBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservation3DRangeScanPtr> &v_obs2 )
 {
     CDisplayWindow3D window2("ICP-3D demo: UNALIGNED scans",500,500);
     CDisplayWindow3D window3("ICP-3D demo: ICP-ALIGNED scans",500,500);
@@ -612,9 +626,9 @@ void refineLocationPCLBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<COb
 
     // Show in Windows:
 
-    window.setCameraElevationDeg(15);
-    window.setCameraAzimuthDeg(90);
-    window.setCameraZoom(15);
+    window->setCameraElevationDeg(15);
+    window->setCameraAzimuthDeg(90);
+    window->setCameraZoom(15);
 
     window2.setCameraElevationDeg(15);
     window2.setCameraAzimuthDeg(90);
@@ -769,7 +783,9 @@ void refineLocationPCLBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<COb
 
 
 //-----------------------------------------------------------
-//                      refineLocation
+//
+//                      refineLocationICP3D
+//
 //-----------------------------------------------------------
 
 void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_obs2)
@@ -858,26 +874,26 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_o
 
     // Show in Windows:
 
-    window2.get3DSceneAndLock()=scene2;
-    window2.unlockAccess3DScene();
+    window2->get3DSceneAndLock()=scene2;
+    window2->unlockAccess3DScene();
 
-    window3.get3DSceneAndLock()=scene3;
-    window3.unlockAccess3DScene();
+    window3->get3DSceneAndLock()=scene3;
+    window3->unlockAccess3DScene();
 
 
     mrpt::system::sleep(20);
-    window2.forceRepaint();
+    window2->forceRepaint();
 
-    window2.setCameraElevationDeg(15);
-    window2.setCameraAzimuthDeg(90);
-    window2.setCameraZoom(15);
+    window2->setCameraElevationDeg(15);
+    window2->setCameraAzimuthDeg(90);
+    window2->setCameraZoom(15);
 
-    window3.setCameraElevationDeg(15);
-    window3.setCameraAzimuthDeg(90);
-    window3.setCameraZoom(15);
+    window3->setCameraElevationDeg(15);
+    window3->setCameraAzimuthDeg(90);
+    window3->setCameraZoom(15);
 
     //cout << "Press any key to exit..." << endl;
-    //window.waitForKey();
+    //window->waitForKey();
 
     double goodness = 100*icp_info.goodness;
     v_goodness.push_back( goodness );
@@ -908,9 +924,10 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_o
 
 }
 
+
 //-----------------------------------------------------------
 //
-//                          main
+//                    showUsageInformation
 //
 //-----------------------------------------------------------
 
@@ -929,8 +946,11 @@ void showUsageInformation()
             " \t -enable_keyPoses : Enable the use of key poses only." << endl;
 }
 
+
 //-----------------------------------------------------------
+//
 //                          main
+//
 //-----------------------------------------------------------
 
 int main(int argc, char **argv)
@@ -1003,7 +1023,7 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    cout << "[Error] " << argv[arg] << "unknown paramter" << endl;
+                    cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
                     showUsageInformation();
                     return -1;
                 }
@@ -1040,27 +1060,13 @@ int main(int argc, char **argv)
 
         // Create the reference objects:
 
-        if ( refineWithICP3D )
+        if ( refineWithICP3D && ICP3D_method == "ICP" )
         {
-            if ( ICP3D_method == "GICP")
-            {
-                window.setPos(-500,-500);
-                window2.setPos(-500,-500);
-                window3.setPos(-500,-500);
-            }
-            else
-            {
-                window.setPos(10,10);
-                window2.setPos(530,10);
-                window3.setPos(10,520);
-            }
+            window = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: scene",500,500));
+            window2 = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: UNALIGNED scans",500,500));
+            window3 = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: ICP-ALIGNED scans",500,500));
         }
-        else
-        {
-            window.setPos(-500,-500);
-            window2.setPos(-500,-500);
-            window3.setPos(-500,-500);
-        }
+
 
         //
         // Compute initial guess from ICP2D
@@ -1224,9 +1230,9 @@ int main(int argc, char **argv)
                 }
             }
 
-            refineLocationPCLBis( v_allObs[0], v_allObs[1] );
-            refineLocationPCLBis( v_allObs[0], v_allObs[2] );
-            refineLocationPCLBis( v_allObs[0], v_allObs[3] );*/
+            refineLocationGICP3DBis( v_allObs[0], v_allObs[1] );
+            refineLocationGICP3DBis( v_allObs[0], v_allObs[2] );
+            refineLocationGICP3DBis( v_allObs[0], v_allObs[3] );*/
 
             cout << "---------------------------------------------------" << endl;
             cout << "         Refining sensor poses using " << ICP3D_method << endl;
