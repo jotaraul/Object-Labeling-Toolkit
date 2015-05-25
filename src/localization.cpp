@@ -140,10 +140,11 @@ struct T3DRangeScan
         convexHullCloud(new pcl::PointCloud<pcl::PointXYZ>()) {}
 };
 
-vector< TRobotPose > v_robotPoses;
-vector< T3DRangeScan > v_3DRangeScans;
+vector< TRobotPose >    v_robotPoses;
+vector< T3DRangeScan >  v_3DRangeScans;
 vector< CObservation3DRangeScanPtr > v_pending3DRangeScans;
-vector< double > v_goodness;
+vector< double >    v_goodness;
+vector<string>      RGBD_sensors;
 
 
 //-----------------------------------------------------------
@@ -242,14 +243,15 @@ void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog,
                       CObservation2DRangeScanPtr obs2D, double &goodness )
 {
     CSimplePointsMap		m1,m2;
+
     float					runningTime;
     CICP::TReturnInfo		info;
     CICP					ICP;
 
     m1.load2D_from_text_file(simpleMapFile);
-    //cout << "M1 size: " << m1.size();
-
     m2.insertObservation( obs2D.pointer() );
+
+    //cout << "M1 size: " << m1.size();
     //cout << "M2 size: " << m2.size();
 
     // -----------------------------------------------------
@@ -568,8 +570,8 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
 
     cout << " done! Average error: " << sqrt(score) << " meters" << endl;
 
-//    if ( score > 0.1 )
-//        return;
+    //    if ( score > 0.1 )
+    //        return;
 
     // Obtain the transformation that aligned cloud_source to cloud_source_registered
     Eigen::Matrix4f transformation = gicp.getFinalTransformation();
@@ -949,6 +951,20 @@ void showUsageInformation()
 
 //-----------------------------------------------------------
 //
+//                   getRGBDSensorIndex
+//
+//-----------------------------------------------------------
+
+size_t getRGBDSensorIndex( const string sensorLabel )
+{
+    for ( size_t i_sensor = 0; i_sensor < RGBD_sensors.size(); i_sensor++ )
+        if ( sensorLabel == RGBD_sensors[i_sensor] )
+            return i_sensor;
+}
+
+
+//-----------------------------------------------------------
+//
 //                          main
 //
 //-----------------------------------------------------------
@@ -961,7 +977,6 @@ int main(int argc, char **argv)
         CRawlog i_rawlog, o_rawlog;
         CTicTac clock;
         double time_icp2D = 0, time_icp3D = 0, time_smoothing = 0, time_overlapping = 0;
-        vector<string> RGBD_sensors;
 
         string i_rawlogFile;
         string o_rawlogFile;
@@ -1084,6 +1099,7 @@ int main(int argc, char **argv)
             {
                 CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
 
+                // 2D laser observation
                 if ( IS_CLASS(obs, CObservation2DRangeScan) )
                 {
                     CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
@@ -1106,7 +1122,8 @@ int main(int argc, char **argv)
                     if ( !v_pending3DRangeScans.empty() )
                         processPending3DRangeScans();
                 }
-                else //if ( obs->sensorLabel == RGBD_sensor )
+                // 3D range scan observation
+                else if ( IS_CLASS(obs, CObservation3DRangeScan) )
                 {
                     string &label = obs->sensorLabel;
 
@@ -1127,18 +1144,20 @@ int main(int argc, char **argv)
 
             trajectoryFile.close();
         }
-        else
+        else // If not using ICP2D initial guess, just fill the vector of 3D obs
         {
             for ( size_t obsIndex = 0; obsIndex < i_rawlog.size(); obsIndex++ )
             {
                 CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
 
-                if ( IS_CLASS(obs, CObservation2DRangeScan) )
+                if ( IS_CLASS(obs, CObservation3DRangeScan) )
                 {
+                    string &label = obs->sensorLabel;
 
-                }
-                else
-                {
+                    if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
+                         == RGBD_sensors.end() )
+                        RGBD_sensors.push_back(label);
+
                     CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
                     obs3D->load();
 
@@ -1165,7 +1184,7 @@ int main(int argc, char **argv)
 
             time_smoothing = clock.Tac();
 
-            cout << " done." << endl;
+            cout << "done." << endl;
         }
 
         //
@@ -1199,6 +1218,8 @@ int main(int argc, char **argv)
         //
         // Refine using ICP3D
         //
+
+        size_t N_sensors = RGBD_sensors.size();
 
         if ( refineWithICP3D )
         {
@@ -1238,256 +1259,135 @@ int main(int argc, char **argv)
             cout << "         Refining sensor poses using " << ICP3D_method << endl;
             cout << "---------------------------------------------------" << endl;
 
-            if ( RGBD_sensors.size() == 4 )
+
+            vector<T3DRangeScan> v_obs;  // Past set of obs
+            vector<T3DRangeScan> v_obsC(N_sensors); // Current set of obs
+            vector<size_t> v_obsC_indices(N_sensors);            // Indices in v_3DRangeScans vector of the current set of obs
+            vector<size_t> v_obsToDelete; // If using key poses, not key obs to delete
+            vector<bool> v_obs_loaded(N_sensors,false);
+
+            bool first = true;
+            size_t set_index = 0;
+
+            CTicTac clockEllapsedICP3D;
+            clockEllapsedICP3D.Tic();
+
+            for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
             {
+                CTicTac clockLoop;
+                clockLoop.Tic();
 
-                vector<T3DRangeScan> v_obs;  // Past set of obs
-                vector<T3DRangeScan> v_obs2(4); // Current set of obs
-                vector<size_t> v_obs2_indices(4);            // Indices in v_3DRangeScans vector of the current set of obs
-                vector<size_t> v_obsToDelete; // If using key poses, not key obs to delete
-                vector<bool> v_obs_loaded(4,false);
+                T3DRangeScan obs = v_3DRangeScans[obsIndex];
 
-                bool first = true;
-                size_t set_index = 0;
+                size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
 
-                CTicTac clockEllapsedICP3D;
-                clockEllapsedICP3D.Tic();
+                v_obsC[sensorIndex]       = obs;
+                v_obs_loaded[sensorIndex] = true;
+                v_obsC_indices[sensorIndex] = obsIndex;
 
-                for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
+                double sum = 0;
+
+                for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                    sum += v_obs_loaded[i_sensor];
+
+                if ( sum == N_sensors )
                 {
-                    CTicTac clockLoop;
-                    clockLoop.Tic();
+                    v_obs_loaded.clear();
+                    v_obs_loaded.resize(N_sensors,false);
 
-                    T3DRangeScan obs = v_3DRangeScans[obsIndex];
-
-                    if ( obs.obs->sensorLabel == "RGBD_1" )
-                    {
-                        v_obs2[0]       = obs;
-                        v_obs_loaded[0] = true;
-                        v_obs2_indices[0] = obsIndex;
-                    }
-                    else if ( obs.obs->sensorLabel == "RGBD_2" )
-                    {
-                        v_obs2[1]       = obs;
-                        v_obs_loaded[1] = true;
-                        v_obs2_indices[1] = obsIndex;
-                    }
-                    else if ( obs.obs->sensorLabel == "RGBD_3" )
-                    {
-                        v_obs2[2]       = obs;
-                        v_obs_loaded[2] = true;
-                        v_obs2_indices[2] = obsIndex;
-                    }
-                    else if ( obs.obs->sensorLabel == "RGBD_4" )
-                    {
-                        v_obs2[3]       = obs;
-                        v_obs_loaded[3] = true;
-                        v_obs2_indices[3] = obsIndex;
-                    }
-
-                    double sum;
-
-                    sum = v_obs_loaded[0] + v_obs_loaded[1] + v_obs_loaded[2] + v_obs_loaded[3];
-
-                    if ( sum == 4 )
-                    {
-                        v_obs_loaded.clear();
-                        v_obs_loaded.resize(4,false);
-
-                        cout << "Working set of obs index... " << set_index++ << " of approx. " << (double)N_scans/4 << endl;
-
-                        if ( first )
-                        {
-                            v_obs = v_obs2;
-                            first = false;
-                            continue;
-                        }
-                        else
-                        {
-                            // Check if it's a key pose
-                            if ( useKeyPoses )
-                            {
-                                bool keyPose = true;
-
-                                CPose3D pose1,pose2,pose3,pose4;
-                                CPose3D pose2_1,pose2_2,pose2_3,pose2_4;
-
-                                size_t N_prevObs = v_obs.size();
-
-                                v_obs[N_prevObs-4].obs->getSensorPose(pose1);
-                                v_obs[N_prevObs-3].obs->getSensorPose(pose2);
-                                v_obs[N_prevObs-2].obs->getSensorPose(pose3);
-                                v_obs[N_prevObs-1].obs->getSensorPose(pose4);
-
-                                v_obs2[0].obs->getSensorPose(pose2_1);
-                                v_obs2[1].obs->getSensorPose(pose2_2);
-                                v_obs2[2].obs->getSensorPose(pose2_3);
-                                v_obs2[3].obs->getSensorPose(pose2_4);
-
-                                keyPose = keyPose && isKeyPose(pose2_1,pose1);
-                                keyPose = keyPose && isKeyPose(pose2_2,pose2);
-                                keyPose = keyPose && isKeyPose(pose2_3,pose3);
-                                keyPose = keyPose && isKeyPose(pose2_4,pose4);
-
-                                if (!keyPose)
-                                {
-                                    //                                cout << "Delete: " << v_obs2_indices[0] << " " << v_obs2_indices[1] << " " <<
-                                    //                                        v_obs2_indices[2] << " " << v_obs2_indices[3] << endl;
-
-                                    cout << "Not a key pose, moving to the next one." << endl;
-                                    cout << "---------------------------------------------------" << endl;
-
-                                    v_obsToDelete.push_back(v_obs2_indices[0]);
-                                    v_obsToDelete.push_back(v_obs2_indices[1]);
-                                    v_obsToDelete.push_back(v_obs2_indices[2]);
-                                    v_obsToDelete.push_back(v_obs2_indices[3]);
-                                    continue;
-                                }
-                            }
-                        }
-
-                        vector<T3DRangeScan>  v1(1,v_obs2[0]);
-                        vector<T3DRangeScan>  v2(1,v_obs2[1]);
-                        vector<T3DRangeScan>  v3(1,v_obs2[2]);
-                        vector<T3DRangeScan>  v4(1,v_obs2[3]);
-
-                        if ( ICP3D_method == "GICP" )
-                        {
-                            if ( accumulatePast )
-                            {
-                                refineLocationGICP3D( v_obs, v1  );
-                                refineLocationGICP3D( v_obs, v2  );
-                                refineLocationGICP3D( v_obs, v3  );
-                                refineLocationGICP3D( v_obs, v4  );
-                            }
-                            else
-                                refineLocationGICP3D( v_obs, v_obs2 );
-                        }
-                        else // ICP3D
-                        {
-                            if ( accumulatePast )
-                            {
-                                refineLocationICP3D( v_obs, v1  );
-                                refineLocationICP3D( v_obs, v2  );
-                                refineLocationICP3D( v_obs, v3  );
-                                refineLocationICP3D( v_obs, v4  );
-                            }
-                            else
-                                refineLocationICP3D( v_obs, v_obs2 );
-                        }
-
-                        //                    CPose3D pose1, pose2,pose3,pose4;
-
-                        //                    v_obs2[0]->getSensorPose(pose1);
-                        //                    v_obs2[1]->getSensorPose(pose2);
-                        //                    v_obs2[2]->getSensorPose(pose3);
-                        //                    v_obs2[3]->getSensorPose(pose4);
-
-                        //                    cout << "Pose 1 results: " << pose1 << endl;
-                        //                    cout << "Pose 2 results: " << pose2 << endl;
-                        //                    cout << "Pose 3 results: " << pose3 << endl;
-                        //                    cout << "Pose 4 results: " << pose4 << endl;
-
-                        if ( accumulatePast )
-                            v_obs.insert(v_obs.end(), v_obs2.begin(), v_obs2.end() );
-                        else
-                            v_obs = v_obs2;
-
-                        // Time Statistics
-
-                        cout << "Time ellapsed      : " <<
-                                size_t(clockLoop.Tac()  / SECS_PER_MIN) << " min. " <<
-                                size_t(clockLoop.Tac()) % SECS_PER_MIN << " s." << endl;
-
-                        cout << "Total time ellapsed: " <<
-                                size_t(clockEllapsedICP3D.Tac()  / SECS_PER_MIN) << " min. " <<
-                                size_t(clockEllapsedICP3D.Tac()) % SECS_PER_MIN  << " s." << endl;
-
-                        cout << "---------------------------------------------------" << endl;
-                    }
-                }
-            }
-            else
-            {
-                vector<T3DRangeScan> v_obs;  // Past obs
-                vector<T3DRangeScan> v_obs2(1); // Current obs
-
-                bool first = true;
-                size_t set_index = 0;
-
-                CTicTac clockEllapsedICP3D;
-                clockEllapsedICP3D.Tic();
-
-                for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
-                {
-                    CTicTac clockLoop;
-                    clockLoop.Tic();
-
-                    T3DRangeScan obs = v_3DRangeScans[obsIndex];
-
-                    v_obs2[0] = obs;
-
-                    cout << "Working obs index... " << set_index++ << " of approx. " << N_scans << endl;
+                    cout << "Working set of obs index... " << set_index++ << " of approx. " << (double)N_scans/N_sensors << endl;
 
                     if ( first )
                     {
-                        v_obs = v_obs2;
+                        v_obs = v_obsC;
                         first = false;
                         continue;
                     }
-                    else
+                    // Check if it's a key pose
+                    if ( useKeyPoses )
                     {
+                        bool keyPose = true;
 
-                        vector<T3DRangeScan>  v1(1,v_obs2[0]);
+                        vector<CPose3D> v_poses, v_posesC;
 
-                        if ( ICP3D_method == "GICP" )
+                        size_t N_prevObs = v_obs.size();
+
+                        for ( int i_sensor = N_sensors-1; i_sensor >= 0; i_sensor-- )
+                            v_obs[N_prevObs-i_sensor].obs->getSensorPose(v_poses[i_sensor]);
+
+                        for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                            v_obsC[i_sensor].obs->getSensorPose(v_posesC[i_sensor]);
+
+                        for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                            keyPose = keyPose && isKeyPose(v_posesC[i_sensor],v_poses[i_sensor]);
+
+                        if (!keyPose)
                         {
-                            if ( accumulatePast )
-                            {
-                                refineLocationGICP3D( v_obs, v1  );
-                            }
-                            else
-                                refineLocationGICP3D( v_obs, v_obs2 );
+                            cout << "Not a key pose, moving to the next one." << endl;
+                            cout << "---------------------------------------------------" << endl;
+
+                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                                v_obsToDelete.push_back(v_obsC_indices[i_sensor]);
+
+                            continue;
                         }
-                        else // ICP3D
-                        {
-                            if ( accumulatePast )
-                            {
-                                refineLocationICP3D( v_obs, v1  );
-                            }
-                            else
-                                refineLocationICP3D( v_obs, v_obs2 );
-                        }
-
-                        if ( accumulatePast )
-                            v_obs.insert(v_obs.end(), v_obs2.begin(), v_obs2.end() );
-                        else
-                            v_obs = v_obs2;
-
-                        // Time Statistics
-
-                        cout << "Time ellapsed      : " <<
-                                size_t(clockLoop.Tac()  / SECS_PER_MIN) << " min. " <<
-                                size_t(clockLoop.Tac()) % SECS_PER_MIN << " s." << endl;
-
-                        cout << "Total time ellapsed: " <<
-                                size_t(clockEllapsedICP3D.Tac()  / SECS_PER_MIN) << " min. " <<
-                                size_t(clockEllapsedICP3D.Tac()) % SECS_PER_MIN  << " s." << endl;
-
-                        cout << "---------------------------------------------------" << endl;
                     }
+
+                    vector< vector<T3DRangeScan> > v_isolatedObs(N_sensors);
+                    for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                    {
+                        v_isolatedObs[i_sensor]= vector<T3DRangeScan>(1,v_obsC[i_sensor]);
+                    }
+
+                    if ( ICP3D_method == "GICP" )
+                    {
+                        if ( accumulatePast )
+                        {
+                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                                refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                        }
+                        else
+                            refineLocationGICP3D( v_obs, v_obsC );
+                    }
+                    else // ICP3D
+                    {
+                        if ( accumulatePast )
+                        {
+                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                                refineLocationICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                        }
+                        else
+                            refineLocationICP3D( v_obs, v_obsC );
+                    }
+
+                    if ( accumulatePast )
+                        v_obs.insert(v_obs.end(), v_obsC.begin(), v_obsC.end() );
+                    else
+                        v_obs = v_obsC;
+
+                    // Time Statistics
+
+                    cout << "Time ellapsed      : " <<
+                            size_t(clockLoop.Tac()  / SECS_PER_MIN) << " min. " <<
+                            size_t(clockLoop.Tac()) % SECS_PER_MIN << " s." << endl;
+
+                    cout << "Total time ellapsed: " <<
+                            size_t(clockEllapsedICP3D.Tac()  / SECS_PER_MIN) << " min. " <<
+                            size_t(clockEllapsedICP3D.Tac()) % SECS_PER_MIN  << " s." << endl;
+
+                    cout << "---------------------------------------------------" << endl;
                 }
-
-                cout << "Mean goodness: "
-                     << std::accumulate(v_goodness.begin(), v_goodness.end(), 0.0 ) / v_goodness.size()
-                     << endl;
-
-                cout << " done." << endl;
-
-                time_icp3D = clock.Tac();
-
             }
         }
+
+        cout << "Mean goodness: "
+             << std::accumulate(v_goodness.begin(), v_goodness.end(), 0.0 ) / v_goodness.size()
+             << endl;
+
+        cout << " done." << endl;
+
+        time_icp3D = clock.Tac();
+
 
         TTimeStamp totalTime;
         TTimeParts totalTimeParts;

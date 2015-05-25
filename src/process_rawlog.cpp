@@ -251,7 +251,7 @@ int main(int argc, char* argv[])
                     onlyHokuyo = true;
                     cout << "[INFO] Processing only hokuyo observations."  << endl;
                 }
-                if ( !strcmp(argv[arg],"-h") )
+                else if ( !strcmp(argv[arg],"-h") )
                 {
                     showUsageInformation();
                     return 0;
