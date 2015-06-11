@@ -33,6 +33,7 @@
 #include <mrpt/system/threads.h>
 #include <mrpt/utils/CTicTac.h>
 #include <mrpt/maps/PCL_adapters.h>
+#include <mrpt/maps/CColouredPointsMap.h>
 
 #include <mrpt/slam/CICP.h>
 
@@ -41,6 +42,7 @@
 #include <mrpt/poses/CPose3DPDF.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/gui/CDisplayWindow3D.h>
+#include <mrpt/opengl/CPointCloudColoured.h>
 #include <mrpt/opengl/CGridPlaneXY.h>
 #include <mrpt/opengl/CSphere.h>
 #include <mrpt/opengl/CAngularObservationMesh.h>
@@ -93,7 +95,10 @@ bool accumulatePast     = false;
 bool useKeyPoses        = false;
 bool smooth3DObs        = false;
 bool useOverlappingObs  = false;
+bool manuallyFix        = false;
+bool processInBlock     = true;
 bool visualize2DResults = true;
+double scoreThreshold = 0.0;
 
 string ICP3D_method;
 
@@ -419,6 +424,266 @@ void processPending3DRangeScans()
 
 }
 
+void manuallyFixAlign( vector<T3DRangeScan> &v_obs,
+                       vector<T3DRangeScan> &v_obs2,
+                       CPose3D &estimated_pose )
+{
+    cout << "[INFO] Manually fixing. Initial pose: " << estimated_pose << endl;
+
+    TPose3D pose;
+
+    double OFFSET = 0.1;
+    double OFFSET_ANGLES = 0.1;
+
+    // GL points
+    mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
+    gl_points->setPointSize(2);
+
+    // Coloured point cloud
+    CColouredPointsMap colouredMap;
+    colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
+    colouredMap.insertionOptions.minDistBetweenLaserPoints = 0.01;
+
+    for ( size_t obs_index = 0; obs_index < v_obs2.size(); obs_index++ )
+    {
+        CDisplayWindow3D window2("GICP-3D: manually aligning scans",500,500);
+
+        COpenGLScenePtr scene=COpenGLScene::Create();
+
+        window2.get3DSceneAndLock()=scene;
+
+        opengl::CGridPlaneXYPtr plane1=CGridPlaneXY::Create(-20,20,-20,20,0,1);
+        plane1->setColor(0.3,0.3,0.3);
+
+        scene->insert(plane1);
+
+        // Show in Window
+
+        window2.setCameraElevationDeg(15);
+        window2.setCameraAzimuthDeg(90);
+        window2.setCameraZoom(15);
+
+        for ( size_t i = 0; i < v_obs.size(); i++ )
+        {
+            CObservation3DRangeScanPtr obs3D = v_obs[i].obs;
+            mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
+            gl_points->setPointSize(2);
+            //gl_points->setColorA(0.5);
+
+            CColouredPointsMap colouredMap;
+            colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
+            colouredMap.insertionOptions.minDistBetweenLaserPoints = 0.01;
+            colouredMap.loadFromRangeScan( *obs3D );
+
+            gl_points->loadFromPointsMap( &colouredMap );
+
+            scene->insert( gl_points );
+        }
+
+        CObservation3DRangeScanPtr obs3D = v_obs2[obs_index].obs;
+
+        if ( !processInBlock )
+            colouredMap.loadFromRangeScan( *obs3D );
+        else
+        {
+            CColouredPointsMap colouredMapAux;
+            colouredMapAux.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
+            colouredMapAux.insertionOptions.minDistBetweenLaserPoints = 0.01;
+            colouredMapAux.loadFromRangeScan( *obs3D );
+
+            colouredMap.addFrom(colouredMapAux);
+        }
+
+        gl_points->loadFromPointsMap( &colouredMap );
+        gl_points->setPose(estimated_pose);
+        pose = gl_points->getPose();
+        cout << "working with pose" << pose << " when set was: " << estimated_pose << endl;
+        scene->insert( gl_points );
+
+        window2.unlockAccess3DScene();
+        window2.forceRepaint();
+
+        if ( ( !processInBlock ) || ( obs_index == v_obs2.size()-1 ) )
+        {
+            window2.addTextMessage(0.02,0.06+0.03*0, "[Rot]   'Ins': +yaw 'Del': -yaw 'Home': +pitch 'End': -pitch 'Pag-up': +roll 'Pag-down': -roll", TColorf(1,1,1),10,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+            window2.addTextMessage(0.02,0.06+0.03*1, "[Moves] 'up': +x 'down': -x 'left': +y 'right': -y '1': +z '0': -z", TColorf(1,1,1),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+            window2.addTextMessage(0.02,0.06+0.03*2, "[Offsets]  's': reduce 'b': increment 'r': reset", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+
+            while ( window2.isOpen() )
+            {
+
+                if ( window2.keyHit() )
+                {
+                    window2.get3DSceneAndLock()=scene;
+
+                    int key = window2.getPushedKey();
+
+                    vector<double> v_pose;
+                    CVectorDouble v_pose2;
+
+                    switch ( key )
+                    {
+
+                    // Control the "amount" of size and angles increment/decrement
+                    case ( 'r' ):
+                    {
+                        OFFSET = 0.02;
+                        OFFSET_ANGLES = 0.02;
+
+                        break;
+                    }
+                    case ( 'b' ):
+                    {
+                        OFFSET = OFFSET*5;
+                        OFFSET_ANGLES = OFFSET_ANGLES*5;
+
+                        break;
+                    }
+                    case ( 's' ):
+                    {
+                        OFFSET = OFFSET*0.1;
+                        OFFSET_ANGLES = OFFSET_ANGLES*0.1;
+
+                        break;
+                    }
+
+                        // SIZE
+
+                    case ( MRPTK_LEFT ) : // y axis left
+                    {
+                        CPose3D move(0,OFFSET,0,0,0,0);
+                        gl_points->setPose(move+pose);
+
+                        break;
+                    }
+                    case ( MRPTK_DOWN ) : // x axis down
+                    {
+                        CPose3D move(-OFFSET,0,0,0,0,0);
+                        gl_points->setPose(move+pose);
+
+                        break;
+                    }
+                    case ( MRPTK_RIGHT ) : // y axis right
+                    {
+                        CPose3D move(0,-OFFSET,0,0,0,0);
+                        gl_points->setPose(move+pose);
+
+                        break;
+                    }
+                    case ( MRPTK_UP ) : // x axis up
+                    {
+                        CPose3D move(OFFSET,0,0,0,0,0);
+                        gl_points->setPose(move+pose);
+
+                        break;
+                    }
+                    case ('1') : // z axis up
+                    {
+                        CPose3D move(0,0,OFFSET,0,0,0);
+                        gl_points->setPose(move+pose);
+
+                        break;
+                    }
+                    case ('0') : // z axis down255
+                    {
+                        CPose3D move(0,0,-OFFSET,0,0,0);
+                        gl_points->setPose(move+pose);
+
+                        break;
+                    }
+                    case ( MRPTK_INSERT ) : // yaw
+                    {
+                        pose.getAsVector(v_pose);
+                        CPose3D move(0,0,0,OFFSET_ANGLES,0,0);
+                        CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
+                        CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
+
+                        gl_points->setPose(poseFinal);
+
+                        break;
+                    }
+                    case ( MRPTK_DELETE ) : // -yaw
+                    {
+                        pose.getAsVector(v_pose);
+                        CPose3D move(0,0,0,-OFFSET_ANGLES,0,0);
+                        CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
+                        CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
+
+                        gl_points->setPose(poseFinal);
+                        break;
+                    }
+                    case ( MRPTK_HOME ) : // pitch
+                    {
+                        CPose3D move(0,0,0,0,-OFFSET_ANGLES,0);
+                        pose.getAsVector(v_pose);
+                        CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
+                        CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
+
+                        gl_points->setPose(poseFinal);
+
+                        break;
+                    }
+                    case ( MRPTK_END ) : // -pitch
+                    {
+                        CPose3D move(0,0,0,0,OFFSET_ANGLES,0);
+                        pose.getAsVector(v_pose);
+                        CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
+                        CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
+
+                        gl_points->setPose(poseFinal);
+
+                        break;
+                    }
+                    case ( MRPTK_PAGEUP ) : // roll
+                    {
+                        CPose3D move(0,0,0,0,0,-OFFSET_ANGLES);
+                        pose.getAsVector(v_pose);
+                        CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
+                        CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
+
+                        gl_points->setPose(poseFinal);
+
+                        break;
+                    }
+                    case ( MRPTK_PAGEDOWN ) : // -roll
+                    {
+                        CPose3D move(0,0,0,0,0,OFFSET_ANGLES);
+                        pose.getAsVector(v_pose);
+                        CPose3D( move + CPose3D(0,0,0,v_pose[3],v_pose[4], v_pose[5] ) ).getAsVector(v_pose2);
+                        CPose3D poseFinal(v_pose[0], v_pose[1], v_pose[2],v_pose2[3],v_pose2[4],v_pose2[5]);
+
+                        gl_points->setPose(poseFinal);
+
+                        break;
+                    }
+
+                    case ('R') : // RESET
+                    {
+                        CPose3D move(0,0,0,0,0,0);
+                        gl_points->setPose(move);
+
+                        break;
+                    }
+
+                    default:
+                        break;
+                    }
+
+                    pose = gl_points->getPose();
+
+                    window2.unlockAccess3DScene();
+                    window2.repaint();
+                }
+            }
+
+            //window2.waitForKey();
+        }
+    }
+
+    estimated_pose = pose;
+
+    cout << "[INFO] Final pose: " << estimated_pose << endl;
+}
 
 //-----------------------------------------------------------
 //
@@ -559,7 +824,7 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
 
     //cout << "done"  << endl;
 
-    cout << "Doing ICP...";
+    cout << "Doing GICP...";
 
     gicp.align(*cloud_trans);
 
@@ -569,9 +834,6 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
     v_goodness.push_back(score);
 
     cout << " done! Average error: " << sqrt(score) << " meters" << endl;
-
-    //    if ( score > 0.1 )
-    //        return;
 
     // Obtain the transformation that aligned cloud_source to cloud_source_registered
     Eigen::Matrix4f transformation = gicp.getFinalTransformation();
@@ -588,6 +850,9 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
     estimated_pose.y(transformation(1,3));
     estimated_pose.z(transformation(2,3));
 
+    if ( sqrt(score) > scoreThreshold && manuallyFix )
+        manuallyFixAlign( v_obs, v_obs2, estimated_pose );
+
     for ( size_t i = 0; i < v_obs2.size(); i++ )
     {
         CObservation3DRangeScanPtr obs = v_obs2[i].obs;
@@ -597,9 +862,10 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
 
         CPose3D finalPose = estimated_pose + pose;
         obs->setSensorPose(finalPose);
-    }
 
-    //cout << "Location set done" << endl;
+
+        //cout << "Location set done" << endl;
+    }
 }
 
 
@@ -945,7 +1211,9 @@ void showUsageInformation()
             " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
             " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
             " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
-            " \t -enable_keyPoses : Enable the use of key poses only." << endl;
+            " \t -enable_keyPoses : Enable the use of key poses only." << endl <<
+            " \t -enable_manuallyFix <score>: Enable manual alignment when poor score." << endl <<
+            " \t -enable_processInBlock: Enable the processing of the obs from all sensors in block." << endl;
 }
 
 
@@ -1031,6 +1299,21 @@ int main(int argc, char **argv)
                     smooth3DObs  = true;
                     cout << "[INFO] Enabled smoothing."  << endl;
                 }
+                else if ( !strcmp(argv[arg], "-enable_manuallyFix") )
+                {
+                    scoreThreshold = atof(argv[arg+1]);
+                    arg += 2;
+
+                    manuallyFix   = true;
+                    cout << "[INFO] Enabled manually fixing of missaligned RGB-D obs. ";
+                    cout << "Score threshold: " << scoreThreshold << endl;
+                }
+                else if ( !strcmp(argv[arg], "-enable_processInBlock") )
+                {
+                    processInBlock   = true;
+                    cout << "[INFO] Enabled processing of all the sensor obs in block."  << endl;
+                }
+
                 else if ( !strcmp(argv[arg], "-h") )
                 {
                     showUsageInformation();
@@ -1071,7 +1354,7 @@ int main(int argc, char **argv)
         if (!i_rawlog.loadFromRawLogFile(i_rawlogFile))
             throw std::runtime_error("Couldn't open rawlog dataset file for input...");
 
-        cout << "[INFO] Working with " << i_rawlogFile << endl;
+        //cout << "[INFO] Working with " << i_rawlogFile << endl;
 
         // Create the reference objects:
 
@@ -1227,27 +1510,30 @@ int main(int argc, char **argv)
 
             size_t N_scans = v_3DRangeScans.size();
 
-            /*vector< vector <CObservation3DRangeScanPtr> > v_allObs(4);  // Past set of obs
-
-            for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
+           /* if ( getRGBDRelativeCalibration )
             {
-                CObservation3DRangeScanPtr obs = v_3DRangeScans[obsIndex];
+                vector< vector <CObservation3DRangeScanPtr> > v_allObs(4);  // Past set of obs
 
-                if ( obs->sensorLabel == "RGBD_1" )
+                for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
                 {
-                    v_allObs[0].push_back(obs);
-                }
-                else if ( obs->sensorLabel == "RGBD_2" )
-                {
-                    v_allObs[1].push_back(obs);
-                }
-                else if ( obs->sensorLabel == "RGBD_3" )
-                {
-                    v_allObs[2].push_back(obs);
-                }
-                else if ( obs->sensorLabel == "RGBD_4" )
-                {
-                    v_allObs[3].push_back(obs);
+                    CObservation3DRangeScanPtr obs = v_3DRangeScans[obsIndex];
+
+                    if ( obs->sensorLabel == "RGBD_1" )
+                    {
+                        v_allObs[0].push_back(obs);
+                    }
+                    else if ( obs->sensorLabel == "RGBD_2" )
+                    {
+                        v_allObs[1].push_back(obs);
+                    }
+                    else if ( obs->sensorLabel == "RGBD_3" )
+                    {
+                        v_allObs[2].push_back(obs);
+                    }
+                    else if ( obs->sensorLabel == "RGBD_4" )
+                    {
+                        v_allObs[3].push_back(obs);
+                    }
                 }
             }
 
@@ -1343,8 +1629,11 @@ int main(int argc, char **argv)
                     {
                         if ( accumulatePast )
                         {
-                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                            if ( processInBlock )
+                                refineLocationGICP3D( v_obs, v_obsC );
+                            else
+                                for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                                    refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor]  );
                         }
                         else
                             refineLocationGICP3D( v_obs, v_obsC );
@@ -1353,8 +1642,11 @@ int main(int argc, char **argv)
                     {
                         if ( accumulatePast )
                         {
-                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                refineLocationICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                            if ( processInBlock )
+                                refineLocationICP3D( v_obs, v_obsC );
+                            else
+                                for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                                    refineLocationICP3D( v_obs, v_isolatedObs[i_sensor]  );
                         }
                         else
                             refineLocationICP3D( v_obs, v_obsC );

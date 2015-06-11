@@ -186,7 +186,7 @@ int main(int argc, char* argv[])
                     }
                     else if ( !strcmp(argv[arg],"-zUpperLimit") )
                     {
-                        zUpperLimit = atoi(argv[arg+1]);
+                        zUpperLimit = atof(argv[arg+1]);
                         arg += 2;
                     }
                     else
@@ -288,7 +288,7 @@ int main(int argc, char* argv[])
             mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
 
             mrpt::opengl::CPointCloudColouredPtr gl_points = mrpt::opengl::CPointCloudColoured::Create();
-            gl_points->setPointSize(3);
+            gl_points->setPointSize(2);
 
             CColouredPointsMap colouredMap;
             colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;

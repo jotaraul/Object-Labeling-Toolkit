@@ -219,9 +219,10 @@ int main(int argc, char* argv[])
         // Useful variables
         //
 
-        CRawlog i_rawlog, o_rawlog, o_rawlogHokuyo;
+        CRawlog i_rawlog, o_rawlog, o_rawlogHokuyo, o_rawlogRGBD;
         string hokuyo = "HOKUYO1";
         bool onlyHokuyo = false;
+        bool onlyRGBD = false;
 
         string configFileName;
 
@@ -250,6 +251,11 @@ int main(int argc, char* argv[])
                 {
                     onlyHokuyo = true;
                     cout << "[INFO] Processing only hokuyo observations."  << endl;
+                }
+                if ( !strcmp(argv[arg],"-only_rgbd") )
+                {
+                    onlyRGBD = true;
+                    cout << "[INFO] Processing only rgbd observations."  << endl;
                 }
                 else if ( !strcmp(argv[arg],"-h") )
                 {
@@ -309,8 +315,10 @@ int main(int argc, char* argv[])
 
                 obs2D->setSensorPose(v_laser_sensorPoses[0]);
 
-                o_rawlogHokuyo.addObservationMemoryReference(obs2D);
-                o_rawlog.addObservationMemoryReference(obs2D);
+                if ( onlyHokuyo)
+                    o_rawlogHokuyo.addObservationMemoryReference(obs2D);
+                else
+                    o_rawlog.addObservationMemoryReference(obs2D);
             }
             else
             {
@@ -350,7 +358,10 @@ int main(int argc, char* argv[])
 
                     obs3D->project3DPointsFromDepthImage();
 
-                    o_rawlog.addObservationMemoryReference(obs3D);
+                    if ( onlyRGBD)
+                        o_rawlogRGBD.addObservationMemoryReference(obs3D);
+                    else
+                        o_rawlog.addObservationMemoryReference(obs3D);
 
                     // Visualization purposes
 
@@ -379,12 +390,15 @@ int main(int argc, char* argv[])
 
         o_rawlogFileName.assign(i_rawlogFilename.begin(), i_rawlogFilename.end()-7);
         o_rawlogFileName += (onlyHokuyo) ? "_hokuyo" : "";
+        o_rawlogFileName += (onlyRGBD) ? "_rgbd" : "";
         o_rawlogFileName += "_processed.rawlog";
 
-        if ( !onlyHokuyo )
-            o_rawlog.saveToRawLogFile( o_rawlogFileName );
-        else
+        if ( onlyHokuyo )
             o_rawlogHokuyo.saveToRawLogFile( o_rawlogFileName );
+        else if ( onlyRGBD)
+            o_rawlogRGBD.saveToRawLogFile( o_rawlogFileName );
+        else
+            o_rawlog.saveToRawLogFile( o_rawlogFileName );
 
         cout << "[INFO] Rawlog saved as " << o_rawlogFileName << endl;
 

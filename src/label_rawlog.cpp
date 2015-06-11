@@ -87,6 +87,7 @@ struct TConfiguration
     string  rawlogFile;     // Rawlog file to be labeled
     string  labelledScene;  // Scene already labeled by "Label_scene"
     bool    instancesLabeled; // Are we working with instances? e.g. knife_1
+    bool    saveLabeledImgsToFile; // Save label masks to a .jpg file
 };
 
 //
@@ -123,6 +124,25 @@ void showUsageInformation()
 
 //-----------------------------------------------------------
 //
+//                    getInstanceLabel
+//
+//-----------------------------------------------------------
+
+string getInstanceLabel(const string &instaceLabel )
+{
+    map<string,TPoint3D>::iterator it;
+
+    for ( it = m_consideredLabels.begin(); it != m_consideredLabels.end(); it++ )
+        if ( instaceLabel.find(it->first)!=std::string::npos )
+            return it->first;
+
+    string empty;
+    return empty;
+}
+
+
+//-----------------------------------------------------------
+//
 //                      loadConfig
 //
 //-----------------------------------------------------------
@@ -136,6 +156,9 @@ void loadConfig( string const configFile )
     configuration.visualizeLabels = config.read_bool("GENERAL","visualizeLabels",0,true);
     configuration.rawlogFile      = config.read_string("GENERAL","rawlogFile","",true);
     configuration.labelledScene   = config.read_string("GENERAL","labelledScene","",true);
+    configuration.instancesLabeled= config.read_bool("GENERAL","instancesLabeled","",true);
+    configuration.saveLabeledImgsToFile= config.read_bool("GENERAL","saveLabeledImgsToFile","",true);
+
 
     // Load object labels (classes) to be considered
 
@@ -243,8 +266,18 @@ void  loadLabelledScene()
 
                 v_labelled_boxes.push_back( labelled_box );
 
-                if ( !m_consideredLabels.count(labelled_box.label) )
-                    cout << "[CAUTION] label " << labelled_box.label << " does not appear in the label list." << endl;
+                if ( !configuration.instancesLabeled )
+                {
+                    if ( !m_consideredLabels.count(labelled_box.label) )
+                        cout << "[CAUTION] label " << labelled_box.label << " does not appear in the label list." << endl;
+                }
+                else
+                {
+                    string label = getInstanceLabel(labelled_box.label);
+                    if ( label.empty() )
+                        cout << "[CAUTION] label of instance " << labelled_box.label << " does not appear in the label list." << endl;
+                }
+
 
                 // Check if the label has been already inserted
                 if ( find(v_appearingLabels.begin(),
@@ -262,24 +295,6 @@ void  loadLabelledScene()
     else
         cout << "[ERROR] While loading the labelled scene file." << endl;
 
-}
-
-
-//-----------------------------------------------------------
-//
-//                    getInstanceLabel
-//
-//-----------------------------------------------------------
-
-string getInstanceLabel(const string &instaceLabel )
-{
-    map<string,TPoint3D>::iterator it;
-
-    for ( it = m_consideredLabels.begin(); it != m_consideredLabels.end(); it++ )
-        if ( it->first.find(instaceLabel)!=std::string::npos )
-            return it->first;
-
-    return "";
 }
 
 
@@ -309,7 +324,10 @@ void labelObs(CObservation3DRangeScanPtr obs,
 
         viewer = pclWindow(new pcl::visualization::PCLVisualizer ("3D Viewer"));
         viewer->initCameraParameters ();
+    }
 
+    if ( configuration.visualizeLabels || configuration.saveLabeledImgsToFile )
+    {
         for ( size_t row = 0; row < N_rows; row++ )
             for ( size_t col = 0; col < N_cols; col++ )
                 img.setPixel(row, col, 0);
@@ -349,7 +367,7 @@ void labelObs(CObservation3DRangeScanPtr obs,
             // Give color to the point cloud excerpt
             //
 
-            if ( configuration.visualizeLabels )
+            if ( configuration.visualizeLabels || configuration.saveLabeledImgsToFile )
             {
                 cropHull.filter(*outputCloud);
 
@@ -399,7 +417,8 @@ void labelObs(CObservation3DRangeScanPtr obs,
                 //viewer->adsetSizedPointCloud( box.convexHullCloud );
                 stringstream ss;
                 ss << "Outputcloud_" << box_index;
-                viewer->addPointCloud( coloredOutputCloud,string(ss.str()) );
+                if ( configuration.visualizeLabels )
+                    viewer->addPointCloud( coloredOutputCloud,string(ss.str()) );
             }
 
             // Label the observation itself
@@ -455,6 +474,14 @@ void labelObs(CObservation3DRangeScanPtr obs,
         while (!viewer->wasStopped())
             viewer->spinOnce(100);
 
+    }
+
+    if ( configuration.saveLabeledImgsToFile )
+    {
+        static int count = 0;
+        std::stringstream ss;
+        ss << "img_" << count++ << ".jpg";
+        img.saveToFile(ss.str());
     }
 
     //cout << "Let's see.... " << endl;
@@ -582,7 +609,7 @@ int main(int argc, char* argv[])
             // Check if the sensor is being used
             if ( !sensors_to_use.empty()
                  && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
-                     == sensors_to_use.end() )
+                 == sensors_to_use.end() )
                 continue;
 
             // Get obs pose
