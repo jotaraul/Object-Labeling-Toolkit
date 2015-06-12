@@ -47,15 +47,11 @@ FIND_PACKAGE( MRPT REQUIRED slam;gui;hwdrivers;gui;vision;topography)
 # PCL library:
 # --------------------------------------------
 
-SET(CMAKE_OPENMORA_HAS_PCL 0)
 find_package(PCL 1.7 REQUIRED)
 if (PCL_FOUND)
-	SET(CMAKE_OPENMORA_HAS_PCL 1)
-
 	INCLUDE_DIRECTORIES(${PCL_INCLUDE_DIRS})
 	link_directories(${PCL_LIBRARY_DIRS})
 	add_definitions(${PCL_DEFINITIONS})
-
 endif(PCL_FOUND)
 
 # The debug post-fix of .dll /.so libs
@@ -105,3 +101,6 @@ TARGET_LINK_LIBRARIES(Segmentation ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
 ADD_EXECUTABLE(Create_video ${CMAKE_SOURCE_DIR}/src/create_video.cpp)
 TARGET_LINK_LIBRARIES(Create_video ${PCL_LIBRARIES} ${MRPT_LIBS} )
+
+ADD_EXECUTABLE(Dataset_statistics ${CMAKE_SOURCE_DIR}/src/dataset_statistics.cpp)
+TARGET_LINK_LIBRARIES(Dataset_statistics ${PCL_LIBRARIES} ${MRPT_LIBS} )
