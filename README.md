@@ -21,6 +21,7 @@ This project is structured as follows:
         ![Scene being labeled with the OLT tool](http://mapir.isa.uma.es/jotaraul/Resources/example_scene.png "Scene being labeled with the OLT tool")
 
     * *Label_rawlog*: Propagates the annotated labels in a scene to each observation within the dataset.
+    * *Dataset_statistics*: Shows information of the dataset, e.g. a summary of the objects appearing on it, number of times that they appear, number of pixels they occupy, etc.
     * *Create_video & Segmentation*: Experimental applications under development.
 * _Examples of configuration files_: A directoy containing some examples of configuration files to be used with the different toolkit applications.
 
