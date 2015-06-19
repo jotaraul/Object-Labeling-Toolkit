@@ -1583,6 +1583,9 @@ int main(int argc, char **argv)
                     v_obs_loaded[sensorIndex] = true;
                     v_obsC_indices[sensorIndex] = obsIndex;
 
+                    //cout << "Sensor index " << sensorIndex;
+                    //cout << " included " << obs.obs->sensorLabel << endl;
+
                     double sum = 0;
 
                     for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
@@ -1599,6 +1602,31 @@ int main(int argc, char **argv)
                         {
                             v_obs = v_obsC;
                             first = false;
+
+                            if ( manuallyFix )
+                            {
+                                vector<T3DRangeScan> v_aligned;
+                                v_aligned.push_back(v_obs[0]);
+
+                                for ( size_t i_sensor = 1; i_sensor < N_sensors; i_sensor++ )
+                                {
+                                    CPose3D estimated_pose;
+                                    //v_obs[i_sensor].obs->getSensorPose(estimated_pose);
+
+                                    vector<T3DRangeScan> v_toAligne;
+                                    v_toAligne.push_back(v_obs[i_sensor]);
+                                    manuallyFixAlign( v_aligned, v_toAligne, estimated_pose );
+
+                                    CPose3D pose;
+                                    v_obs[i_sensor].obs->getSensorPose( pose );
+
+                                    CPose3D finalPose = estimated_pose + pose;
+                                    v_obs[i_sensor].obs->setSensorPose(finalPose);
+
+                                    v_aligned.push_back( v_obs[i_sensor] );
+                                }
+                            }
+
                             continue;
                         }
                         // Check if it's a key pose
@@ -1631,6 +1659,7 @@ int main(int argc, char **argv)
                             }
                         }
 
+                                   // Build vectors with individual observations
                         vector< vector<T3DRangeScan> > v_isolatedObs(N_sensors);
                         for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
                         {
