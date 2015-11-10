@@ -1,3 +1,4 @@
 CMakeLists.txt.user
 src/tests.cpp
 src/calibrate.cpp
+third_party

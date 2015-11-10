@@ -35,6 +35,10 @@
 #include <iostream>
 #include <fstream>
 
+#ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+    #include <clams/discrete_depth_distortion_model.h>
+#endif
+
 using namespace mrpt;
 using namespace mrpt::utils;
 using namespace mrpt::math;
@@ -60,6 +64,11 @@ struct TRGBD_Sensor{
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
 bool useDefaultIntrinsics;
+
+#ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+    // Intrinsic model to undistort the depth image
+    clams::DiscreteDepthDistortionModel intrinsic_model;
+#endif
 
 
 //-----------------------------------------------------------
@@ -145,6 +154,13 @@ void loadConfig( const string configFileName )
         else
             keepLoading = false;
     }
+
+    #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+
+
+    #endif
+
+
 }
 
 //-----------------------------------------------------------
@@ -302,7 +318,7 @@ int main(int argc, char* argv[])
             // Show progress
 
             cout << "Processing " << obsIndex << " of " << i_rawlog.size() << '\xd';
-            mrpt::system::sleep(10);
+            cout.flush();
 
             CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
 
@@ -356,7 +372,16 @@ int main(int argc, char* argv[])
 
                     }
 
-                    obs3D->project3DPointsFromDepthImage();
+                    // Apply depth intrinsic calibration?
+                    #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+                        // Intrinsic model to undistort the depth image
+                        clams::DiscreteDepthDistortionModel intrinsic_model;
+
+                    #endif
+
+
+
+                    obs3D->project3DPointsFromDepthImage();                    
 
                     if ( onlyRGBD)
                         o_rawlogRGBD.addObservationMemoryReference(obs3D);

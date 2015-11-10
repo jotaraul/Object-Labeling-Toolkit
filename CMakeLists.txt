@@ -75,12 +75,54 @@ set(CMAKE_DEBUG_POSTFIX  "-dbg")
 #ENDIF(UNIX)
 
 
+set(OLT_USING_CLAMS_INTRINSIC_CALIBRATION "binary" CACHE BOOL
+  "Check if an intrinsic calibration by CLAMS of the RGB-D sensors within the dataset is available.")
+
+if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+	MESSAGE("Using CLAMS intrinsitc calibration of RGB-D sensors")
+	add_definitions(-DUSING_CLAMS_INTRINSIC_CALIBRATION)
+
+	#INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/third_party/CLAMS/include)
+
+	set(CLAMS_INCLUDE_DIR "" CACHE PATH
+	  "Path to the CLAMS include directory")
+
+	INCLUDE_DIRECTORIES(${CLAMS_INCLUDE_DIR})	
+
+	set(CLAMS_DISCRETE_DEPTH_DISTORTION_MODEL_HEADER "" CACHE FILEPATH
+	  "File called discrete_depth_distortion_model.h")
+
+	set(CLAMS_DISCRETE_DEPTH_DISTORTION_MODEL_SOURCE "" CACHE FILEPATH
+	  "File called discrete_depth_distortion_model.cpp")
+
+	ADD_LIBRARY(Undistort 
+		${CLAMS_DISCRETE_DEPTH_DISTORTION_MODEL_HEADER}
+		${CLAMS_DISCRETE_DEPTH_DISTORTION_MODEL_SOURCE}
+	)
+
+
+	# Create the undistort library
+	#ADD_LIBRARY(Undistort
+	#		./third_party/CLAMS/include/clams/discrete_depth_distortion_model.h
+	#		./third_party/CLAMS/discrete_depth_distortion_model.cpp
+	#)
+
+	TARGET_LINK_LIBRARIES(Undistort libboost_system.so libboost_thread.so)
+
+	# Tell CMake that the linker language is C++
+	SET_TARGET_PROPERTIES(Undistort PROPERTIES LINKER_LANGUAGE CXX)
+
+else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+	MESSAGE("Non using CLAMS intrisic calibration of RGB-D sensors")
+endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+
+
 #------------------------------------------------------------------------------#
 #                           Toolkit-executables
 #------------------------------------------------------------------------------#
 
 ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/src/process_rawlog.cpp)
-TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} )
+TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
 
 ADD_EXECUTABLE(Localize_sensors ${CMAKE_SOURCE_DIR}/src/localization.cpp)
 TARGET_LINK_LIBRARIES(Localize_sensors ${PCL_LIBRARIES} ${MRPT_LIBS} )
