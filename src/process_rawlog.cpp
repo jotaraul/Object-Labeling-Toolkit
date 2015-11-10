@@ -366,20 +366,16 @@ int main(int argc, char* argv[])
                         }
                         else
                         {
-                            obs3D->cameraParams.scaleToResolution(320,244);
-                            obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                            obs3D->cameraParams.scaleToResolution(320,244);                            obs3D->cameraParamsIntensity.scaleToResolution(320,240);
                         }
 
                     }
 
                     // Apply depth intrinsic calibration?
                     #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-                        // Intrinsic model to undistort the depth image
-                        clams::DiscreteDepthDistortionModel intrinsic_model;
-
+                        // TODO:
+                        // Undistort Depth image
                     #endif
-
-
 
                     obs3D->project3DPointsFromDepthImage();                    
 
