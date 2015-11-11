@@ -59,16 +59,17 @@ struct TRGBD_Sensor{
     CPose3D pose;
     string  sensorLabel;
     bool    loadIntrinsicParameters;
+    #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+        // Intrinsic model to undistort the depth image of an RGBD sensor
+        clams::DiscreteDepthDistortionModel depth_intrinsic_model;
+    #endif
 };
 
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
 bool useDefaultIntrinsics;
 
-#ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-    // Intrinsic model to undistort the depth image
-    clams::DiscreteDepthDistortionModel intrinsic_model;
-#endif
+
 
 
 //-----------------------------------------------------------
@@ -145,6 +146,13 @@ void loadConfig( const string configFileName )
             RGBD_sensor.pose.setFromValues(x,y,z,yaw,pitch,roll);
             RGBD_sensor.sensorLabel = sensorLabel;
             RGBD_sensor.loadIntrinsicParameters = loadIntrinsic;
+
+            #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+                // Load CLAMS intrinsic model for depth camera
+                string DepthIntrinsicModelpath = config.read_string(sensorLabel,"DepthIntrinsicModelpath","",true);
+                RGBD_sensor.depth_intrinsic_model.load(DepthIntrinsicModelpath);
+            #endif
+
             v_RGBD_sensors.push_back( RGBD_sensor );
 
             cout << "[INFO] loaded extrinsic calibration for " << sensorLabel << endl;
@@ -155,10 +163,7 @@ void loadConfig( const string configFileName )
             keepLoading = false;
     }
 
-    #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
 
-
-    #endif
 
 
 }
@@ -373,9 +378,12 @@ int main(int argc, char* argv[])
 
                     // Apply depth intrinsic calibration?
                     #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-                        // TODO:
                         // Undistort Depth image
+                        Eigen::MatrixXf depthMatrix = obs3D->rangeImage;
+                        v_RGBD_sensors[RGBD_sensorIndex].depth_intrinsic_model.undistort(&depthMatrix);
+                        obs3D->rangeImage = depthMatrix;
                     #endif
+
 
                     obs3D->project3DPointsFromDepthImage();                    
 
