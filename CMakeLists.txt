@@ -122,7 +122,12 @@ endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 #------------------------------------------------------------------------------#
 
 ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/src/process_rawlog.cpp)
-TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
+
+if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+	TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
+else
+	TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS})
+endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
 ADD_EXECUTABLE(Localize_sensors ${CMAKE_SOURCE_DIR}/src/localization.cpp)
 TARGET_LINK_LIBRARIES(Localize_sensors ${PCL_LIBRARIES} ${MRPT_LIBS} )
