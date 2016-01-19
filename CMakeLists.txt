@@ -75,7 +75,7 @@ set(CMAKE_DEBUG_POSTFIX  "-dbg")
 #ENDIF(UNIX)
 
 
-set(OLT_USING_CLAMS_INTRINSIC_CALIBRATION "binary" CACHE BOOL
+set(OLT_USING_CLAMS_INTRINSIC_CALIBRATION "FALSE" CACHE BOOL
   "Check if an intrinsic calibration by CLAMS of the RGB-D sensors within the dataset is available.")
 
 if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
