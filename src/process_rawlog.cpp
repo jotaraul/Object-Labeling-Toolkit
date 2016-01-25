@@ -68,6 +68,7 @@ struct TRGBD_Sensor{
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
 bool useDefaultIntrinsics;
+bool equalizeRGBHistograms;
 
 
 
@@ -84,7 +85,8 @@ void loadConfig( const string configFileName )
 
     cout << "[INFO] loading component options from " << configFileName << endl;
 
-    useDefaultIntrinsics = config.read_bool("GENERAL","use_default_intrinsics","",true);
+    useDefaultIntrinsics  = config.read_bool("GENERAL","use_default_intrinsics","",true);
+    equalizeRGBHistograms = config.read_bool("GENERAL","equalize_RGB_histograms","",true);
 
     //
     // Load 2D laser scanners info
@@ -384,10 +386,14 @@ int main(int argc, char* argv[])
                         obs3D->rangeImage = depthMatrix;
                     #endif
 
+                    // Project 3D points from the depth image
+                    obs3D->project3DPointsFromDepthImage();
 
-                    obs3D->project3DPointsFromDepthImage();                    
+                    // Equalize histogram of RGB images?
+                    if ( equalizeRGBHistograms )
+                        obs3D->intensityImage.equalizeHistInPlace();
 
-                    if ( onlyRGBD)
+                    if ( onlyRGBD )
                         o_rawlogRGBD.addObservationMemoryReference(obs3D);
                     else
                         o_rawlog.addObservationMemoryReference(obs3D);
