@@ -31,6 +31,8 @@
 #include <mrpt/poses/CPosePDF.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/utils/CConfigFile.h>
+#include <mrpt/utils/CFileGZInputStream.h>
+#include <mrpt/utils/CFileGZOutputStream.h>
 
 #include <iostream>
 #include <fstream>
@@ -242,7 +244,6 @@ int main(int argc, char* argv[])
         // Useful variables
         //
 
-        CRawlog i_rawlog, o_rawlog, o_rawlogHokuyo, o_rawlogRGBD;
         string hokuyo = "HOKUYO1";
         bool onlyHokuyo = false;
         bool onlyRGBD = false;
@@ -311,23 +312,42 @@ int main(int argc, char* argv[])
         // Open rawlog file
         //
 
-        if (!i_rawlog.loadFromRawLogFile(i_rawlogFilename))
-            throw std::runtime_error("Couldn't open rawlog dataset file for input...");
+        CFileGZInputStream i_rawlog(i_rawlogFilename);
+        /*if (!i_rawlog.loadFromRawLogFile(i_rawlogFilename))
+            throw std::runtime_error("Couldn't open rawlog dataset file for input...");*/
 
         cout << "[INFO] Working with " << i_rawlogFilename << endl;
+
+        //
+        // Set output rawlog file
+        //
+
+        o_rawlogFileName.assign(i_rawlogFilename.begin(), i_rawlogFilename.end()-7);
+        o_rawlogFileName += (onlyHokuyo) ? "_hokuyo" : "";
+        o_rawlogFileName += (onlyRGBD) ? "_rgbd" : "";
+        o_rawlogFileName += "_processed.rawlog";
+
+        CFileGZOutputStream o_rawlog(o_rawlogFileName);
 
         //
         // Process rawlog
         //
 
-        for ( size_t obsIndex = 0; obsIndex < i_rawlog.size(); obsIndex++ )
+        CActionCollectionPtr action;
+        CSensoryFramePtr observations;
+        CObservationPtr obs;
+        size_t obsIndex = 0;
+
+        while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
         {
+            // Check that it is an observation
+            if ( !obs )
+                continue;
+
             // Show progress
 
-            cout << "Processing " << obsIndex << " of " << i_rawlog.size() << '\xd';
+            cout << "Processing " << obsIndex++ << '\xd';
             cout.flush();
-
-            CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
 
             // Observation from a laser range scan device
 
@@ -338,10 +358,12 @@ int main(int argc, char* argv[])
 
                 obs2D->setSensorPose(v_laser_sensorPoses[0]);
 
-                if ( onlyHokuyo)
+                o_rawlog << obs2D;
+
+                /*if ( onlyHokuyo)
                     o_rawlogHokuyo.addObservationMemoryReference(obs2D);
                 else
-                    o_rawlog.addObservationMemoryReference(obs2D);
+                    o_rawlog.addObservationMemoryReference(obs2D);*/
             }
             else
             {
@@ -393,10 +415,12 @@ int main(int argc, char* argv[])
                     if ( equalizeRGBHistograms )
                         obs3D->intensityImage.equalizeHistInPlace();
 
-                    if ( onlyRGBD )
+                    o_rawlog << obs3D;
+
+                    /*if ( onlyRGBD )
                         o_rawlogRGBD.addObservationMemoryReference(obs3D);
                     else
-                        o_rawlog.addObservationMemoryReference(obs3D);
+                        o_rawlog.addObservationMemoryReference(obs3D);*/
 
                     // Visualization purposes
 
@@ -419,23 +443,10 @@ int main(int argc, char* argv[])
 
         }
 
-        //
-        // Save processed rawlog to file
-        //
-
-        o_rawlogFileName.assign(i_rawlogFilename.begin(), i_rawlogFilename.end()-7);
-        o_rawlogFileName += (onlyHokuyo) ? "_hokuyo" : "";
-        o_rawlogFileName += (onlyRGBD) ? "_rgbd" : "";
-        o_rawlogFileName += "_processed.rawlog";
-
-        if ( onlyHokuyo )
-            o_rawlogHokuyo.saveToRawLogFile( o_rawlogFileName );
-        else if ( onlyRGBD)
-            o_rawlogRGBD.saveToRawLogFile( o_rawlogFileName );
+        if ( !obsIndex )
+            cout << "No observations loaded nor processed. Erroneous rawlog name?" << endl;
         else
-            o_rawlog.saveToRawLogFile( o_rawlogFileName );
-
-        cout << "[INFO] Rawlog saved as " << o_rawlogFileName << endl;
+            cout << "[INFO] Rawlog saved as " << o_rawlogFileName << endl;
 
         return 0;
 
