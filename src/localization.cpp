@@ -345,6 +345,7 @@ bool isKeyPose( CPose3D &pose, CPose3D &lastPose)
     
     float dist = sqrt(pow(pose_v[0]-lastPose_v[0],2) +
                       pow(pose_v[1]-lastPose_v[1],2) ); // x-y distance
+
     float angle = abs( pose_v[3]-lastPose_v[3] ); // Diff in yaw
     
     //    cout << "Distance: " << dist << " and angle: " << RAD2DEG(angle) << endl;
@@ -1568,8 +1569,8 @@ int main(int argc, char **argv)
                     
                     v_pending3DRangeScans.push_back( obs3D );
                 }
-                /*else
-                    continue;*/
+                else
+                    continue;
             }
             
             time_icp2D = clock.Tac();
@@ -1660,7 +1661,9 @@ int main(int argc, char **argv)
             
             if ( processBySensor )
             {
-                cout << "[INFO] Getting relative position among devices." << endl;
+                cout << "---------------------------------------------------" << endl;
+                cout << "      Getting relative position among devices " << ICP3D_method << endl;
+                cout << "---------------------------------------------------" << endl;
                 
                 vector< vector <T3DRangeScan> > v_allObs(N_sensors);  // Past set of obs
                 
@@ -1690,9 +1693,9 @@ int main(int argc, char **argv)
                 
                 vector<T3DRangeScan> v_obs;  // Past set of obs
                 vector<T3DRangeScan> v_obsC(N_sensors); // Current set of obs
-                vector<size_t> v_obsC_indices(N_sensors);            // Indices in v_3DRangeScans vector of the current set of obs
+                vector<size_t> v_obsC_indices(N_sensors); // Indices in v_3DRangeScans vector of the current set of obs
                 vector<size_t> v_obsToDelete; // If using key poses, not key obs to delete
-                vector<bool> v_obs_loaded(N_sensors,false);
+                vector<bool> v_obs_loaded(N_sensors,false); // Track the sensors with an obs loaded
                 
                 bool first = true;
                 size_t set_index = 0;
@@ -1759,6 +1762,7 @@ int main(int argc, char **argv)
 
                             continue;
                         }
+
                         // Check if it's a key pose
                         if ( useKeyPoses )
                         {

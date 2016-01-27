@@ -253,7 +253,7 @@ void showUsageInformation()
 
 
 //-----------------------------------------------------------
-//main
+//
 //                          main
 //
 //-----------------------------------------------------------
@@ -321,7 +321,7 @@ int main(int argc, char* argv[])
                     onlyHokuyo = true;
                     cout << "[INFO] Processing only hokuyo observations."  << endl;
                 }
-                if ( !strcmp(argv[arg],"-only_rgbd") )
+                else if ( !strcmp(argv[arg],"-only_rgbd") )
                 {
                     onlyRGBD = true;
                     cout << "[INFO] Processing only rgbd observations."  << endl;
@@ -414,13 +414,8 @@ int main(int argc, char* argv[])
                 obs2D->setSensorPose(v_laser_sensorPoses[0]);
 
                 o_rawlog << obs2D;
-
-                /*if ( onlyHokuyo)
-                    o_rawlogHokuyo.addObservationMemoryReference(obs2D);
-                else
-                    o_rawlog.addObservationMemoryReference(obs2D);*/
             }
-            else
+            else if ( !onlyHokuyo )
             {
                 // RGBD observation?
 
