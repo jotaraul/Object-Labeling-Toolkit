@@ -137,8 +137,8 @@ const double KEY_POSE_ANGLE_THRESHOLD = DEG2RAD((float)20);
 struct TRobotPose
 {
     TTimeStamp  time;
-    CPose2D     pose;
-    double      goodness;
+    TPose2D     pose;
+    float      goodness;
 };
 
 struct T3DRangeScan
@@ -192,6 +192,8 @@ void showUsageInformation()
 
 int loadParameters(int argc, char **argv)
 {
+    cout << "[INFO] Loading parameters from command line...";
+
     for ( size_t arg = 3; arg < argc; arg++ )
     {
         if ( !strcmp(argv[arg],"-disable_ICP2D") )
@@ -268,6 +270,8 @@ int loadParameters(int argc, char **argv)
         }
 
     }
+
+    cout << "done!" << endl;
 }
 
 
@@ -593,7 +597,7 @@ void processPending3DRangeScans()
             // Get an approximation of where was gathered the 3D range scan
             double interpolationFactor = ( tdPos1Obs / tdPositions );
             
-            CPose2D posPoseDif = rp2.pose - rp1.pose;
+            CPose2D posPoseDif = CPose2D(rp2.pose) - CPose2D(rp1.pose);
             
             CVectorDouble v_coords;
             posPoseDif.getAsVector(v_coords);
@@ -605,9 +609,9 @@ void processPending3DRangeScans()
             intermediatePose.getAsVector( v_coordsIntermediatePose );
             
             CVectorDouble v_rp1Pose;
-            rp1.pose.getAsVector( v_rp1Pose );
+            CPose2D(rp1.pose).getAsVector( v_rp1Pose );
             
-            CPose2D poseToSum = rp1.pose + intermediatePose;
+            CPose2D poseToSum = CPose2D(rp1.pose) + intermediatePose;
             
             CPose3D finalPose = poseToSum + pose;
             
@@ -1440,8 +1444,6 @@ int main(int argc, char **argv)
     try
     {
         string simpleMapFile;
-        CFileGZInputStream i_rawlog;
-        CFileGZOutputStream o_rawlog;
         CTicTac clock;
         double time_icp2D = 0, time_icp3D = 0, time_smoothing = 0, time_overlapping = 0;
         
@@ -1490,6 +1492,8 @@ int main(int argc, char **argv)
             o_rawlogFile += "-smoothed";
         
         o_rawlogFile += ".rawlog";
+
+        CFileGZOutputStream o_rawlog(o_rawlogFile);
         
         //
         //  Check the input rawlog file
@@ -1499,6 +1503,9 @@ int main(int argc, char **argv)
             throw std::runtime_error("Couldn't open rawlog dataset file for input...");
         
         cout << "[INFO] Working with " << i_rawlogFile << endl;
+
+        CFileGZInputStream i_rawlog(i_rawlogFile);
+
         
         // Create the reference objects:
         
@@ -1530,7 +1537,6 @@ int main(int argc, char **argv)
             while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,
                                             action,observations,obs,obsIndex) )
             {
-                
                 // 2D laser observation
                 if ( IS_CLASS(obs, CObservation2DRangeScan) )
                 {
@@ -1901,6 +1907,8 @@ int main(int argc, char **argv)
         // Visualize 2D results
         //
         
+        cout << "[INFO] Visualizing 2D results ...";
+
         if ( visualize2DResults )
         {
             win.hold_on();
@@ -1909,9 +1917,9 @@ int main(int argc, char **argv)
             for ( size_t pos_index = 0; pos_index < v_robotPoses.size(); pos_index++ )
             {
                 CVectorDouble v_coords;
-                v_robotPoses[pos_index].pose.getAsVector(v_coords);
-                coord_x.push_back(v_coords[0]);
-                coord_y.push_back(v_coords[1]);
+                //v_robotPoses[pos_index].pose.getAsVector(v_coords);
+                coord_x.push_back(v_robotPoses[pos_index].pose[0]);
+                coord_y.push_back(v_robotPoses[pos_index].pose[1]);
             }
             
             win.plot(coord_x,coord_y,"-m.3");
@@ -1935,6 +1943,7 @@ int main(int argc, char **argv)
             
         }
         
+        cout << " done! See you soon!" << endl;
         return 0;
         
     } catch (exception &e)
