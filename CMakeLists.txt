@@ -54,6 +54,19 @@ if (PCL_FOUND)
 	add_definitions(${PCL_DEFINITIONS})
 endif(PCL_FOUND)
 
+# --------------------------------------------
+# OpenCV
+# --------------------------------------------
+
+find_package( OpenCV REQUIRED )
+#INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
+
+#MESSAGE(STATUS "Found OpenCV version: " ${OpenCV_VERSION})
+#MESSAGE(STATUS "Found include directories: " ${OpenCV_INCLUDE_DIRS})
+#MESSAGE(STATUS "Used as shared library: " ${OpenCV_SHARED})
+#MESSAGE(STATUS "Mangled paths: " ${OpenCV_LIB_COMPONENTS})
+
+
 # The debug post-fix of .dll /.so libs
 # ------------------------------------------
 set(CMAKE_DEBUG_POSTFIX  "-dbg")
@@ -120,13 +133,13 @@ endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 #------------------------------------------------------------------------------#
 #                           Toolkit-executables
 #------------------------------------------------------------------------------#
-
+MESSAGE(STATUS "OpenCV libraries: " ${OpenCV_LIBS})
 ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/src/process_rawlog.cpp)
 
 if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
-	TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
+        TARGET_LINK_LIBRARIES(Process_rawlog ${OpenCV_LIBS} ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
 else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
-	TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS})
+        TARGET_LINK_LIBRARIES(Process_rawlog ${OpenCV_LIBS} ${PCL_LIBRARIES} ${MRPT_LIBS} )
 endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
 ADD_EXECUTABLE(Localize_sensors ${CMAKE_SOURCE_DIR}/src/localization.cpp)

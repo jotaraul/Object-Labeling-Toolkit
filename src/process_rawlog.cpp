@@ -34,6 +34,12 @@
 #include <mrpt/utils/CFileGZInputStream.h>
 #include <mrpt/utils/CFileGZOutputStream.h>
 
+#include <opencv2/opencv.hpp>
+#include <opencv2/opencv_modules.hpp>
+#include <opencv2/core/core.hpp>
+#include "opencv2/imgproc/imgproc.hpp"
+#include "opencv2/imgproc.hpp"
+
 #include <iostream>
 #include <fstream>
 
@@ -70,7 +76,7 @@ struct TRGBD_Sensor{
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
 bool useDefaultIntrinsics;
-bool equalizeRGBHistograms;
+int equalizeRGBHistograms;
 
 
 
@@ -88,7 +94,7 @@ void loadConfig( const string configFileName )
     cout << "[INFO] loading component options from " << configFileName << endl;
 
     useDefaultIntrinsics  = config.read_bool("GENERAL","use_default_intrinsics","",true);
-    equalizeRGBHistograms = config.read_bool("GENERAL","equalize_RGB_histograms","",true);
+    equalizeRGBHistograms = config.read_int("GENERAL","equalize_RGB_histograms",0,true);
 
     //
     // Load 2D laser scanners info
@@ -172,12 +178,12 @@ void loadConfig( const string configFileName )
 
 }
 
+
 //-----------------------------------------------------------
 //
 //                      getSensorPos
 //
 //-----------------------------------------------------------
-
 
 size_t getSensorPos( const string label )
 {
@@ -188,6 +194,49 @@ size_t getSensorPos( const string label )
     }
 
     return -1;
+}
+
+
+//-----------------------------------------------------------
+//
+//                      equalizeCLAHE
+//
+//-----------------------------------------------------------
+
+void equalizeCLAHE( CObservation3DRangeScanPtr obs3D )
+{
+    cv::Mat cvImg = cv::cvarrToMat( obs3D->intensityImage.getAs<IplImage>() );
+
+    cv::Mat lab_image;
+    cv::cvtColor(cvImg, lab_image, CV_BGR2HSV);
+
+    // Extract the L channel
+    std::vector<cv::Mat> lab_planes(3);
+    cv::split(lab_image, lab_planes);  // now we have the L image in lab_planes[0]
+
+    // apply the CLAHE algorithm to the L channel
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
+    clahe->setClipLimit(4);
+    cv::Mat dst;
+    clahe->apply(lab_planes[2], dst);
+
+    // Merge the the color planes back into an Lab image
+    dst.copyTo(lab_planes[2]);
+    cv::merge(lab_planes, lab_image);
+
+    // convert back to RGB
+    cv::Mat image_clahe;
+    cv::cvtColor(lab_image, image_clahe, CV_HSV2BGR);
+
+    IplImage* final;
+    final = cvCreateImage(cvSize(image_clahe.cols,image_clahe.rows),8,3);
+    IplImage ipltemp=image_clahe;
+    cvCopy(&ipltemp,final);
+
+    //cout << "N channels: " << final->nChannels << endl;
+
+    obs3D->intensityImage.setFromIplImageReadOnly(final);
+
 }
 
 //-----------------------------------------------------------
@@ -317,6 +366,16 @@ int main(int argc, char* argv[])
             throw std::runtime_error("Couldn't open rawlog dataset file for input...");*/
 
         cout << "[INFO] Working with " << i_rawlogFilename << endl;
+        if (!equalizeRGBHistograms)
+            cout << "[INFO] Not equalizing RGB histograms" << endl;
+        else if ( equalizeRGBHistograms == 1 )
+            cout << "[INFO] Regular RGB histogram equalization" << endl;
+        else if ( equalizeRGBHistograms == 2 )
+            cout << "[INFO] CLAHE RGB histogram equalization" << endl;
+        else
+            cerr << "[ERROR] Unkwnon RGB histogram equalization" << endl;
+
+        cout.flush();
 
         //
         // Set output rawlog file
@@ -395,7 +454,8 @@ int main(int argc, char* argv[])
                         }
                         else
                         {
-                            obs3D->cameraParams.scaleToResolution(320,244);                            obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                            obs3D->cameraParams.scaleToResolution(320,244);
+                            obs3D->cameraParamsIntensity.scaleToResolution(320,240);
                         }
 
                     }
@@ -412,8 +472,10 @@ int main(int argc, char* argv[])
                     obs3D->project3DPointsFromDepthImage();
 
                     // Equalize histogram of RGB images?
-                    if ( equalizeRGBHistograms )
+                    if ( equalizeRGBHistograms == 1 )
                         obs3D->intensityImage.equalizeHistInPlace();
+                    else if ( equalizeRGBHistograms == 2 )
+                        equalizeCLAHE(obs3D);
 
                     o_rawlog << obs3D;
 

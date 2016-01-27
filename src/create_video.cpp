@@ -29,6 +29,8 @@
 #include <mrpt/obs/CRawlog.h>
 #include <mrpt/math/utils.h>
 #include <mrpt/system/threads.h>
+#include <mrpt/utils/CFileGZInputStream.h>
+#include <mrpt/system.h>
 
 #include <mrpt/vision/CVideoFileWriter.h>
 
@@ -55,11 +57,17 @@ bool         useDepthImg = false;
 //                     getImages
 //-----------------------------------------------------------
 
-void getImages( CRawlog &i_rawlog, vector<CImage> &v_images,
+void getImages( CVideoFileWriter &vid, string &i_rawlogFileName,
                 size_t imgWidth, size_t width, size_t height, size_t N_channels,
                 string textToAdd, size_t N_sensors )
 {
+    if ( !mrpt::system::fileExists(i_rawlogFileName) )
+        return;
 
+    cout << "Working with " << i_rawlogFileName;
+    cout.flush();
+
+    CImage lastImg;
     vector<CObservation3DRangeScanPtr> v_obs(4);
     vector<bool>   v_imagesLoaded(4,false);
 
@@ -68,13 +76,17 @@ void getImages( CRawlog &i_rawlog, vector<CImage> &v_images,
     preImage.textOut(10,20,textToAdd,TColor(255,0,255));
 
     for ( size_t i=0; i < 10; i++ )
-        v_images.push_back(preImage);
+        vid << preImage;
 
+    CFileGZInputStream i_rawlog(i_rawlogFileName);
 
-    for ( size_t obsIndex = 0; obsIndex < i_rawlog.size(); obsIndex++ )
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
     {
-        CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
-
         if ( IS_CLASS(obs, CObservation3DRangeScan) )
         {
             CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
@@ -131,10 +143,15 @@ void getImages( CRawlog &i_rawlog, vector<CImage> &v_images,
                 size_t imagesDrawn = 0;
 
                 vector<size_t> v_imgsOrder(4);
-                v_imgsOrder[0] = 2;
+                /*v_imgsOrder[0] = 2;
                 v_imgsOrder[1] = 0;
                 v_imgsOrder[2] = 1;
-                v_imgsOrder[3] = 3;
+                v_imgsOrder[3] = 3;*/
+
+                v_imgsOrder[0] = 2;
+                v_imgsOrder[1] = 3;
+                v_imgsOrder[2] = 0;
+                v_imgsOrder[3] = 1;
 
                 for ( size_t i = 0; i < 4; i++ )
                 {
@@ -179,7 +196,8 @@ void getImages( CRawlog &i_rawlog, vector<CImage> &v_images,
                      }
 
                 rotatedImg.textOut(10,20,textToAdd,TColor(255,0,255));
-                v_images.push_back( rotatedImg );
+                vid << rotatedImg;
+                lastImg = rotatedImg;
 
                 v_imagesLoaded.clear();
                 v_imagesLoaded.resize(4,0);
@@ -187,6 +205,12 @@ void getImages( CRawlog &i_rawlog, vector<CImage> &v_images,
             }
         }
     }
+
+    for ( size_t i = 0; i < 8; i++ )
+        vid << lastImg;
+
+    cout << " DONE!" << endl;
+
 }
 
 //-----------------------------------------------------------
@@ -201,25 +225,32 @@ int main(int argc, char **argv)
         string i_rawlogFile;
         string o_videoFile;
 
+        int fps = 4;
+
         bool batchMode;
 
         string datasetPath;
         vector<string> v_sessions;
-        v_sessions.push_back("session1");
-        v_sessions.push_back("session2");
-        v_sessions.push_back("session3");
+        v_sessions.push_back("");
+//        v_sessions.push_back("session1");
+//        v_sessions.push_back("session2");
+//        v_sessions.push_back("session3");
 
         vector<string> v_sequences;
-        v_sequences.push_back("fullhouse");
-        v_sequences.push_back("kitchen");
-        v_sequences.push_back("room1");
-        v_sequences.push_back("room2");
-        v_sequences.push_back("room3");
+        v_sequences.push_back("fullhouse1");
+        v_sequences.push_back("kitchen1");
+        v_sequences.push_back("bedroom1");
+        v_sequences.push_back("bedroom1");
+        v_sequences.push_back("bedroom2");
+//        v_sequences.push_back("room3");
+        v_sequences.push_back("masterroom1");
         v_sequences.push_back("bathroom1");
         v_sequences.push_back("bathroom2");
-        v_sequences.push_back("corridor");
-        v_sequences.push_back("desktops");
-        v_sequences.push_back("livingroom");
+        v_sequences.push_back("corridor1");
+//        v_sequences.push_back("desktops");
+        v_sequences.push_back("livingroom1");
+        v_sequences.push_back("livingroom2");
+        v_sequences.push_back("hall1");
 
         v_sensorsToUse.resize(4,true);
 
@@ -241,6 +272,11 @@ int main(int argc, char **argv)
                 if ( !strcmp(argv[arg],"-useDepthImg") )
                 {
                     useDepthImg = true;
+                }
+                else if ( !strcmp(argv[arg],"-fps") )
+                {
+                    fps = atoi(argv[arg+1]);
+                    arg++;
                 }
                 else if ( !strcmp(argv[arg],"-batchMode") )
                 {
@@ -315,13 +351,19 @@ int main(int argc, char **argv)
         size_t N_channels = ( useDepthImg ) ? 1 : 3;
 
         vid.open( o_videoFile,
-                  4,
+                  fps,
                   TPixelCoord(width,height),
                   "MJPG",
                   (useDepthImg) ? false : true
                 );
 
-        vector<CImage> v_images;
+        if ( !vid.isOpen() )
+        {
+            cout << "[ERROR] Opening video file." << endl;
+            return -1;
+        }
+
+
 
         //
         // Batch mode
@@ -329,20 +371,10 @@ int main(int argc, char **argv)
 
         if ( !batchMode )
         {
-            CRawlog i_rawlog;
-
             cout << "Working with " << i_rawlogFile << endl;
 
-            if (!i_rawlog.loadFromRawLogFile(i_rawlogFile))
-                throw std::runtime_error("Couldn't open rawlog dataset file for input...");
+            getImages( vid, i_rawlogFile, imgWidth, width, height, N_channels, string(""),N_sensors );
 
-            getImages( i_rawlog, v_images, imgWidth, width, height, N_channels, string(""),N_sensors );
-
-            for ( size_t image_index = 0; image_index < v_images.size(); image_index++ )
-                vid << v_images[image_index];
-
-            for ( size_t i = 0; i < 8; i++ )
-                vid << v_images[v_images.size()-1];
         }
         else
         {
@@ -357,29 +389,11 @@ int main(int argc, char **argv)
                         string i_rawlogFileName = datasetPath+"/"+v_sessions[session_index]+"/"+v_sequences[sequece_index]+"/"+ss.str()+".rawlog";
                         string textToAdd = v_sessions[session_index]+" / "+v_sequences[sequece_index] + " / " + ss.str();
 
-                        try {
-                        if (i_rawlog.loadFromRawLogFile(i_rawlogFileName))
-                        {
-                            cout << "Working with: " << i_rawlogFileName << endl;
 
-                            getImages( i_rawlog, v_images,
-                                       imgWidth, width,
-                                       height, N_channels,
-                                       textToAdd, N_sensors );
-
-                            for ( size_t image_index = 0; image_index < v_images.size(); image_index++ )
-                                vid << v_images[image_index];
-
-                            for ( size_t i = 0; i < 10; i++ )
-                                vid << v_images[v_images.size()-1];
-
-                            v_images.clear();
-                        }
-                        }
-                        catch (...)
-                        {
-
-                        }
+                        getImages( vid, i_rawlogFileName,
+                                   imgWidth, width,
+                                   height, N_channels,
+                                   textToAdd, N_sensors );
                     }
         }
 

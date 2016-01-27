@@ -29,11 +29,15 @@
 #include <mrpt/poses/CPosePDF.h>
 #include <mrpt/poses/CPosePDFGaussian.h>
 #include <mrpt/gui.h>
+#include <mrpt/system/filesystem.h>
 #include <mrpt/math/utils.h>
 #include <mrpt/system/threads.h>
 #include <mrpt/utils/CTicTac.h>
 #include <mrpt/maps/PCL_adapters.h>
 #include <mrpt/maps/CColouredPointsMap.h>
+
+#include <mrpt/utils/CFileGZOutputStream.h>
+#include <mrpt/utils/CFileGZInputStream.h>
 
 #include <mrpt/slam/CICP.h>
 
@@ -156,6 +160,119 @@ vector<string>      RGBD_sensors;
 
 //-----------------------------------------------------------
 //
+//                    showUsageInformation
+//
+//-----------------------------------------------------------
+
+void showUsageInformation()
+{
+    cout << "Usage information. Two expected arguments: " << endl <<
+            " \t (1) Rawlog file." << endl <<
+            " \t (2) Points map file." << endl;
+    cout << "Then, optional parameters:" << endl <<
+            " \t -h             : Shows this help." << endl <<
+            " \t -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
+            " \t -enable_initialGuessGICP : Use GICP to get the initial guess." << endl <<
+            " \t -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
+            " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
+            " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
+            " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
+            " \t -enable_keyPoses : Enable the use of key poses only." << endl <<
+            " \t -enable_manuallyFix <score>: Enable manual alignment when poor score." << endl <<
+            " \t -enable_processInBlock: Enable the processing of the obs from all sensors in block." << endl <<
+            " \t -enable_processBySensor: Align all the obs from a sensor with all the obs of other one." << endl;
+}
+
+
+//-----------------------------------------------------------
+//
+//                      loadParameters
+//
+//-----------------------------------------------------------
+
+int loadParameters(int argc, char **argv)
+{
+    for ( size_t arg = 3; arg < argc; arg++ )
+    {
+        if ( !strcmp(argv[arg],"-disable_ICP2D") )
+        {
+            initialGuessICP2D = false;
+            cout << "[INFO] Disabled ICP2D to guess the robot localization."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_initialGuessGICP") )
+        {
+            initialGuessGICP = true;
+            cout << "[INFO] Enabled GICP for the computation of the initial guess."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_ICP3D") )
+        {
+            refineWithICP3D = true;
+            ICP3D_method    = "ICP";  // MRPT
+            cout << "[INFO] Enabled ICP3D."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_GICP3D") )
+        {
+            refineWithICP3D = true;
+            ICP3D_method     = "GICP"; // PCL
+            cout << "[INFO] Enabled GICP3D."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_memory") )
+        {
+            accumulatePast   = true;
+            cout << "[INFO] Enabled (G)ICP3D memory."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_keyPoses") )
+        {
+            useKeyPoses = true;
+            cout << "[INFO] Enabled key poses."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_overlapping") )
+        {
+            useOverlappingObs = true;
+            cout << "[INFO] Enabled overlapping obs."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_smoothing") )
+        {
+            smooth3DObs  = true;
+            cout << "[INFO] Enabled smoothing."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_manuallyFix") )
+        {
+            scoreThreshold = atof(argv[arg+1]);
+            arg += 1;
+
+            manuallyFix   = true;
+            cout << "[INFO] Enabled manually fixing of missaligned RGB-D obs. ";
+            cout << "Score threshold: " << scoreThreshold << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_processInBlock") )
+        {
+            processInBlock   = true;
+            cout << "[INFO] Enabled processInBlock."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_processBySensor") )
+        {
+            processBySensor   = true;
+            cout << "[INFO] Enabled processBySensor." << endl;
+        }
+        else if ( !strcmp(argv[arg], "-h") )
+        {
+            showUsageInformation();
+            return 0;
+        }
+        else
+        {
+            cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
+            showUsageInformation();
+            return -1;
+        }
+
+    }
+}
+
+
+//-----------------------------------------------------------
+//
 //                      smoothObs
 //
 //-----------------------------------------------------------
@@ -246,8 +363,9 @@ bool isKeyPose( CPose3D &pose, CPose3D &lastPose)
 //
 //-----------------------------------------------------------
 
-void trajectoryICP2D( string &simpleMapFile, CRawlog &rawlog,
-                      CObservation2DRangeScanPtr obs2D, double &goodness )
+void trajectoryICP2D( string &simpleMapFile,
+                      CObservation2DRangeScanPtr obs2D,
+                      double &goodness )
 {
     CSimplePointsMap		m1,m2;
     
@@ -1298,32 +1416,6 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_o
 
 //-----------------------------------------------------------
 //
-//                    showUsageInformation
-//
-//-----------------------------------------------------------
-
-void showUsageInformation()
-{
-    cout << "Usage information. Two expected arguments: " << endl <<
-            " \t (1) Rawlog file." << endl <<
-            " \t (2) Points map file." << endl;
-    cout << "Then, optional parameters:" << endl <<
-            " \t -h             : Shows this help." << endl <<
-            " \t -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
-            " \t -enable_initialGuessGICP : Use GICP to get the initial guess." << endl <<
-            " \t -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
-            " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
-            " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
-            " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
-            " \t -enable_keyPoses : Enable the use of key poses only." << endl <<
-            " \t -enable_manuallyFix <score>: Enable manual alignment when poor score." << endl <<
-            " \t -enable_processInBlock: Enable the processing of the obs from all sensors in block." << endl <<
-            " \t -enable_processBySensor: Align all the obs from a sensor with all the obs of other one." << endl;
-}
-
-
-//-----------------------------------------------------------
-//
 //                   getRGBDSensorIndex
 //
 //-----------------------------------------------------------
@@ -1347,7 +1439,8 @@ int main(int argc, char **argv)
     try
     {
         string simpleMapFile;
-        CRawlog i_rawlog, o_rawlog;
+        CFileGZInputStream i_rawlog;
+        CFileGZOutputStream o_rawlog;
         CTicTac clock;
         double time_icp2D = 0, time_icp3D = 0, time_smoothing = 0, time_overlapping = 0;
         
@@ -1365,91 +1458,20 @@ int main(int argc, char **argv)
             
             o_rawlogFile = i_rawlogFile.substr(0,i_rawlogFile.size()-7);
             
-            for ( size_t arg = 3; arg < argc; arg++ )
-            {
-                if ( !strcmp(argv[arg],"-disable_ICP2D") )
-                {
-                    initialGuessICP2D = false;
-                    cout << "[INFO] Disabled ICP2D to guess the robot localization."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_initialGuessGICP") )
-                {
-                    initialGuessGICP = true;
-                    cout << "[INFO] Enabled GICP for the computation of the initial guess."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_ICP3D") )
-                {
-                    refineWithICP3D = true;
-                    ICP3D_method    = "ICP";  // MRPT
-                    cout << "[INFO] Enabled ICP3D."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_GICP3D") )
-                {
-                    refineWithICP3D = true;
-                    ICP3D_method     = "GICP"; // PCL
-                    cout << "[INFO] Enabled GICP3D."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_memory") )
-                {
-                    accumulatePast   = true;
-                    cout << "[INFO] Enabled (G)ICP3D memory."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_keyPoses") )
-                {
-                    useKeyPoses = true;
-                    cout << "[INFO] Enabled key poses."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_overlapping") )
-                {
-                    useOverlappingObs = true;
-                    cout << "[INFO] Enabled overlapping obs."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_smoothing") )
-                {
-                    smooth3DObs  = true;
-                    cout << "[INFO] Enabled smoothing."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_manuallyFix") )
-                {
-                    scoreThreshold = atof(argv[arg+1]);
-                    arg += 1;
-                    
-                    manuallyFix   = true;
-                    cout << "[INFO] Enabled manually fixing of missaligned RGB-D obs. ";
-                    cout << "Score threshold: " << scoreThreshold << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_processInBlock") )
-                {
-                    processInBlock   = true;
-                    cout << "[INFO] Enabled processInBlock."  << endl;
-                }
-                else if ( !strcmp(argv[arg], "-enable_processBySensor") )
-                {
-                    processBySensor   = true;
-                    cout << "[INFO] Enabled processBySensor." << endl;
-                }
-                else if ( !strcmp(argv[arg], "-h") )
-                {
-                    showUsageInformation();
-                    return 0;
-                }
-                else
-                {
-                    cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
-                    showUsageInformation();
-                    return -1;
-                }
-                
-            }
+            int res = loadParameters(argc,argv);
+
+            if ( res < 0 ) // error while loading parameteres
+                return -1;
+            else if ( !res ) // Just shown the help
+                return 0;
         }
         else
         {
-            showUsageInformation();
-            
+            showUsageInformation();            
             return 0;
         }
         
-        // Set the rawlog name
+        // Set the output rawlog name
         if ( refineWithICP3D && ICP3D_method == "GICP" )
             o_rawlogFile += "_located-GICP";
         else if ( refineWithICP3D && ICP3D_method == "ICP" )
@@ -1467,10 +1489,10 @@ int main(int argc, char **argv)
         o_rawlogFile += ".rawlog";
         
         
-        if (!i_rawlog.loadFromRawLogFile(i_rawlogFile))
+        if (!mrpt::system::fileExists(i_rawlogFile))
             throw std::runtime_error("Couldn't open rawlog dataset file for input...");
         
-        //cout << "[INFO] Working with " << i_rawlogFile << endl;
+        cout << "[INFO] Working with " << i_rawlogFile << endl;
         
         // Create the reference objects:
         
@@ -1489,14 +1511,19 @@ int main(int argc, char **argv)
         cout << "---------------------------------------------------" << endl;
         cout << "        Computing initial poses with ICP2D" << endl;
         cout << "---------------------------------------------------" << endl;
+
+        CActionCollectionPtr action;
+        CSensoryFramePtr observations;
+        CObservationPtr obs;
+        size_t obsIndex = 0;
         
         if ( initialGuessICP2D )
         {
             clock.Tic();
             
-            for ( size_t obsIndex = 0; obsIndex < i_rawlog.size(); obsIndex++ )
+            while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,
+                                            action,observations,obs,obsIndex) )
             {
-                CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
                 
                 // 2D laser observation
                 if ( IS_CLASS(obs, CObservation2DRangeScan) )
@@ -1505,7 +1532,7 @@ int main(int argc, char **argv)
                     obs2D->load();
                     double goodness;
                     
-                    trajectoryICP2D(simpleMapFile,i_rawlog,obs2D,goodness);
+                    trajectoryICP2D(simpleMapFile,obs2D,goodness);
                     
                     TRobotPose robotPose;
                     robotPose.pose = initialPose;
@@ -1546,10 +1573,9 @@ int main(int argc, char **argv)
         }
         else // If not using ICP2D initial guess, just fill the vector of 3D obs
         {
-            for ( size_t obsIndex = 0; obsIndex < i_rawlog.size(); obsIndex++ )
+            while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,
+                                            action,observations,obs,obsIndex) )
             {
-                CObservationPtr obs = i_rawlog.getAsObservation(obsIndex);
-                
                 if ( IS_CLASS(obs, CObservation3DRangeScan) )
                 {
                     string &label = obs->sensorLabel;
@@ -1857,11 +1883,9 @@ int main(int argc, char **argv)
             CSensoryFrame SF;
             SF.insert( v_3DRangeScans[obs_index].obs );
             
-            o_rawlog.addObservationMemoryReference( v_3DRangeScans[obs_index].obs );
-        }
-        
-        o_rawlog.saveToRawLogFile( o_rawlogFile );
-        
+            o_rawlog << v_3DRangeScans[obs_index].obs;
+        }        
+
         cout << " completed." << endl;
         
         //
