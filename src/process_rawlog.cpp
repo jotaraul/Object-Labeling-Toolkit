@@ -34,11 +34,7 @@
 #include <mrpt/utils/CFileGZInputStream.h>
 #include <mrpt/utils/CFileGZOutputStream.h>
 
-#include <opencv2/opencv.hpp>
-#include <opencv2/opencv_modules.hpp>
-#include <opencv2/core/core.hpp>
 #include "opencv2/imgproc/imgproc.hpp"
-#include "opencv2/imgproc.hpp"
 
 #include <iostream>
 #include <fstream>

@@ -1471,7 +1471,10 @@ int main(int argc, char **argv)
             return 0;
         }
         
+        //
         // Set the output rawlog name
+        //
+
         if ( refineWithICP3D && ICP3D_method == "GICP" )
             o_rawlogFile += "_located-GICP";
         else if ( refineWithICP3D && ICP3D_method == "ICP" )
@@ -1481,13 +1484,15 @@ int main(int argc, char **argv)
         
         if ( refineWithICP3D && accumulatePast )
             o_rawlogFile += "-memory";
-        
-        
+                
         if ( smooth3DObs )
             o_rawlogFile += "-smoothed";
         
         o_rawlogFile += ".rawlog";
         
+        //
+        //  Check the input rawlog file
+        //
         
         if (!mrpt::system::fileExists(i_rawlogFile))
             throw std::runtime_error("Couldn't open rawlog dataset file for input...");
