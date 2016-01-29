@@ -236,21 +236,37 @@ int main(int argc, char **argv)
 //        v_sessions.push_back("session2");
 //        v_sessions.push_back("session3");
 
+        vector<string> v_typesOfRooms;
+        v_typesOfRooms.push_back("bathroom");
+        v_typesOfRooms.push_back("bedroom");
+        v_typesOfRooms.push_back("corridor");
+        v_typesOfRooms.push_back("fullhouse");
+        v_typesOfRooms.push_back("hall");
+        v_typesOfRooms.push_back("kitchen");
+        v_typesOfRooms.push_back("livingroom");
+        v_typesOfRooms.push_back("masterroom");
+
         vector<string> v_sequences;
-        v_sequences.push_back("fullhouse1");
-        v_sequences.push_back("kitchen1");
-        v_sequences.push_back("bedroom1");
-        v_sequences.push_back("bedroom1");
-        v_sequences.push_back("bedroom2");
-//        v_sequences.push_back("room3");
-        v_sequences.push_back("masterroom1");
-        v_sequences.push_back("bathroom1");
-        v_sequences.push_back("bathroom2");
-        v_sequences.push_back("corridor1");
-//        v_sequences.push_back("desktops");
-        v_sequences.push_back("livingroom1");
-        v_sequences.push_back("livingroom2");
-        v_sequences.push_back("hall1");
+
+        for ( size_t i = 0; i < v_typesOfRooms.size(); i++ )
+        {
+            std::stringstream ss;
+            ss << v_typesOfRooms[i];
+
+            bool dirExists = true;
+            size_t j = 1;
+
+            while (dirExists)
+            {
+                ss << j;
+                string dir = ss.str();
+
+                if ( mrpt::system::directoryExists(dir) )
+                    v_sequences.push_back(dir);
+                else
+                    dirExists = false;
+            }
+        }
 
         v_sensorsToUse.resize(4,true);
 

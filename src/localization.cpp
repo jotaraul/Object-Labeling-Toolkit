@@ -1888,6 +1888,7 @@ int main(int argc, char **argv)
         cout << "---------------------------------------------------" << endl;
         
         cout << "[INFO] Saving obs to rawlog file " << o_rawlogFile << " ...";
+        cout.flush();
         
         for ( size_t obs_index = 0; obs_index < v_3DRangeScans.size(); obs_index++ )
         {
