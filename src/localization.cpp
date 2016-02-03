@@ -104,6 +104,7 @@ bool manuallyFix        = false;
 bool processBySensor    = false;
 bool processInBlock     = false;
 bool visualize2DResults = true;
+size_t decimation       = 1;
 double scoreThreshold = 0.0;
 
 string ICP3D_method;
@@ -180,7 +181,8 @@ void showUsageInformation()
             " \t -enable_keyPoses : Enable the use of key poses only." << endl <<
             " \t -enable_manuallyFix <score>: Enable manual alignment when poor score." << endl <<
             " \t -enable_processInBlock: Enable the processing of the obs from all sensors in block." << endl <<
-            " \t -enable_processBySensor: Align all the obs from a sensor with all the obs of other one." << endl;
+            " \t -enable_processBySensor: Align all the obs from a sensor with all the obs of other one." << endl <<
+            " \t -enable_RGBDdecimation: Permits to decimate the number of RGB observations to refine the sensors pose." << endl;
 }
 
 
@@ -192,7 +194,7 @@ void showUsageInformation()
 
 int loadParameters(int argc, char **argv)
 {
-    cout << "[INFO] Loading parameters from command line...";
+    cout << "[INFO] Loading parameters from command line..." << endl;
 
     for ( size_t arg = 3; arg < argc; arg++ )
     {
@@ -257,6 +259,14 @@ int loadParameters(int argc, char **argv)
             processBySensor   = true;
             cout << "[INFO] Enabled processBySensor." << endl;
         }
+        else if ( !strcmp(argv[arg], "-enable_RGBDdecimation") )
+        {
+            decimation = atoi(argv[arg+1]);
+            arg += 1;
+
+            cout << "[INFO] Enabled RGBD decimation, using only 1 of each ";
+            cout << decimation << " RGBD observations." << endl;
+        }
         else if ( !strcmp(argv[arg], "-h") )
         {
             showUsageInformation();
@@ -271,7 +281,7 @@ int loadParameters(int argc, char **argv)
 
     }
 
-    cout << "done!" << endl;
+    cout << "[INFO] Loading parameters from command line... DONE!" << endl;
 }
 
 
@@ -1449,6 +1459,13 @@ int main(int argc, char **argv)
         
         string i_rawlogFile;
         string o_rawlogFile;
+
+//        CSimplePointsMap map1,map2;
+//        map1.load2D_from_text_file("map1.txt");
+//        map2.load2D_from_text_file("map2.txt");
+//        CPose3D poseMap2(-5.657933, 1.118298, 0, 2.858798, 0, 0);
+//        map1.insertAnotherMap(&map2,poseMap2);
+//        map1.save2D_to_text_file("map3.txt");
         
         //
         // Load parameters
@@ -1473,6 +1490,8 @@ int main(int argc, char **argv)
             showUsageInformation();            
             return 0;
         }
+
+        mrpt::system::sleep(4000); // Just to see the parameters loaded
         
         //
         // Set the output rawlog name
@@ -1529,6 +1548,7 @@ int main(int argc, char **argv)
         CSensoryFramePtr observations;
         CObservationPtr obs;
         size_t obsIndex = 0;
+        vector<int> RGBDobsPerSensor;
         
         if ( initialGuessICP2D )
         {
@@ -1568,12 +1588,23 @@ int main(int argc, char **argv)
                     
                     if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
                          == RGBD_sensors.end() )
+                    {
                         RGBD_sensors.push_back(label);
+                        RGBDobsPerSensor.push_back(0);
+
+                        //For synchornization with the other possible devices
+                        for ( int i = 0; i < RGBDobsPerSensor.size()-1; i++ )
+                            RGBDobsPerSensor[i] = 0;
+                    }
                     
                     CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
                     obs3D->load();
                     
-                    v_pending3DRangeScans.push_back( obs3D );
+                    // Check decimation and insert the observation
+                    if ( !(RGBDobsPerSensor[getRGBDSensorIndex(label)] % decimation) )
+                        v_pending3DRangeScans.push_back( obs3D );
+
+                    RGBDobsPerSensor[getRGBDSensorIndex(label)]++;
                 }
                 else
                     continue;
@@ -1594,7 +1625,14 @@ int main(int argc, char **argv)
                     
                     if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
                          == RGBD_sensors.end() )
+                    {
                         RGBD_sensors.push_back(label);
+                        RGBDobsPerSensor.push_back(0);
+
+                        //For synchornization with the other possible devices
+                        for ( int i = 0; i < RGBDobsPerSensor.size()-1; i++ )
+                            RGBDobsPerSensor[i] = 0;
+                    }
                     
                     CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
                     obs3D->load();
@@ -1602,10 +1640,17 @@ int main(int argc, char **argv)
                     T3DRangeScan obs;
                     obs.obs = obs3D;
                     
-                    v_3DRangeScans.push_back( obs );
+                    // Check decimation and insert the observation
+                    if ( !(RGBDobsPerSensor[getRGBDSensorIndex(label)] % decimation) )
+                        v_3DRangeScans.push_back( obs );
+
+                    RGBDobsPerSensor[getRGBDSensorIndex(label)]++;
                 }
             }
         }
+
+        cout << "[INFO] Number of RGBD observations to work with: ";
+        cout << v_3DRangeScans.size() << endl;
         
         //
         // Smooth3DObs?

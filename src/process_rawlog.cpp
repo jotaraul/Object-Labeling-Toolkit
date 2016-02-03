@@ -73,8 +73,7 @@ vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in
 
 bool useDefaultIntrinsics;
 int equalizeRGBHistograms;
-
-
+double truncateDepthInfo = 0;
 
 
 //-----------------------------------------------------------
@@ -87,10 +86,12 @@ void loadConfig( const string configFileName )
 {
     CConfigFile config( configFileName );
 
-    cout << "[INFO] loading component options from " << configFileName << endl;
+    cout << "[INFO] Loading component options from " << configFileName << endl;
 
     useDefaultIntrinsics  = config.read_bool("GENERAL","use_default_intrinsics","",true);
     equalizeRGBHistograms = config.read_int("GENERAL","equalize_RGB_histograms",0,true);
+    truncateDepthInfo     = config.read_double("GENERAL","truncateDepthInfo",0,true);
+
 
     //
     // Load 2D laser scanners info
@@ -102,6 +103,8 @@ void loadConfig( const string configFileName )
     string sensorLabel;
     int sensorIndex = 1;
     bool keepLoading = true;
+
+    cout << "[INFO] Loaded extrinsic calibration for ";
 
     while ( keepLoading )
     {
@@ -118,7 +121,8 @@ void loadConfig( const string configFileName )
 
             laser_pose.setFromValues(x,y,z,yaw,pitch,roll);
             v_laser_sensorPoses.push_back( laser_pose );
-            cout << "[INFO] loaded extrinsic calibration for " << sensorLabel << endl;
+
+            cout << sensorLabel << " ";
 
             sensorIndex++;
         }
@@ -161,7 +165,7 @@ void loadConfig( const string configFileName )
 
             v_RGBD_sensors.push_back( RGBD_sensor );
 
-            cout << "[INFO] loaded extrinsic calibration for " << sensorLabel << endl;
+            cout << sensorLabel << " ";
 
             sensorIndex++;
         }
@@ -169,8 +173,7 @@ void loadConfig( const string configFileName )
             keepLoading = false;
     }
 
-
-
+    cout << endl;
 
 }
 
@@ -371,6 +374,11 @@ int main(int argc, char* argv[])
         else
             cerr << "[ERROR] Unkwnon RGB histogram equalization" << endl;
 
+        if ( !truncateDepthInfo )
+            cout << "[INFO] Not truncating depth information" << endl;
+        else
+            cout << "[INFO] Truncating depth information from a distance of " << truncateDepthInfo << "m" << endl;
+
         cout.flush();
 
         //
@@ -399,10 +407,13 @@ int main(int argc, char* argv[])
             if ( !obs )
                 continue;
 
-            // Show progress
+            // Show progress as dots
 
-            cout << "Processing " << obsIndex++ << '\xd';
-            cout.flush();
+            if ( !(obsIndex % 200) )
+            {
+                if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
+                cout.flush();
+            }
 
             // Observation from a laser range scan device
 
@@ -459,6 +470,17 @@ int main(int argc, char* argv[])
                         obs3D->rangeImage = depthMatrix;
                     #endif
 
+                    // Truncate Range image and 3D points?
+                    if ( truncateDepthInfo )
+                    {
+                        size_t N_cols = obs3D->rangeImage.cols();
+                        size_t N_rows = obs3D->rangeImage.rows();
+                        for ( size_t row = 0; row < N_rows; row++ )
+                            for ( size_t col = 0; col < N_cols; col++ )
+                                if( obs3D->rangeImage(row,col) > truncateDepthInfo )
+                                    obs3D->rangeImage(row,col) = 0;
+                    }
+
                     // Project 3D points from the depth image
                     obs3D->project3DPointsFromDepthImage();
 
@@ -497,9 +519,9 @@ int main(int argc, char* argv[])
         }
 
         if ( !obsIndex )
-            cout << "No observations loaded nor processed. Erroneous rawlog name?" << endl;
+            cout << endl << "No observations loaded nor processed. Erroneous rawlog name?" << endl;
         else
-            cout << "[INFO] Rawlog saved as " << o_rawlogFileName << endl;
+            cout << endl << "[INFO] Rawlog saved as " << o_rawlogFileName << endl;
 
         return 0;
 
