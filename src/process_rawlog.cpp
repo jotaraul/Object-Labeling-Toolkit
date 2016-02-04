@@ -58,7 +58,43 @@ using namespace std;
 // Visualization purposes
 //mrpt::gui::CDisplayWindow3D  win3D;
 
-vector<CPose3D> v_laser_sensorPoses; // Poses of the 2D laser scaners in the robot
+//
+// Useful variables
+//
+
+string configFileName;
+bool setCalibrationParameters = true;
+bool computeScaleBetweenRGBDSensors = false;
+
+struct TCalibrationConfig{
+
+    bool only2DLaser;
+    bool onlyRGBD;
+    bool useDefaultIntrinsics;
+    int  equalizeRGBHistograms;
+    double truncateDepthInfo;
+    string i_rawlogFilename;
+
+    TCalibrationConfig() : only2DLaser(false),
+        onlyRGBD(false), useDefaultIntrinsics(true), equalizeRGBHistograms(false),
+        truncateDepthInfo(0), i_rawlogFilename("")
+    {}
+
+} calibConfig;
+
+struct TComputeScaleConfig{
+
+    float resolution;
+    float lowerRange;
+    float higerRange;
+    string referenceSensor;
+    string o_scaleCalibrationFile;
+    vector<float> v_roughDistances;
+    vector<string> v_i_rawlogFiles;
+
+    TComputeScaleConfig()
+    {}
+} computeScaleConfig;
 
 struct TRGBD_Sensor{
     CPose3D pose;
@@ -73,17 +109,7 @@ struct TRGBD_Sensor{
 
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
-bool setCalibrationParameters = true;
-bool onlyHokuyo               = false;
-bool onlyRGBD                 = false;
-bool useDefaultIntrinsics;
-int equalizeRGBHistograms;
-double truncateDepthInfo      = 0;
-
-bool computeScaleBetweenRGBDSensors = false;
-
-string configFileName;
-string i_rawlogFilename;
+vector<CPose3D> v_laser_sensorPoses; // Poses of the 2D laser scaners in the robot
 
 
 //-----------------------------------------------------------
@@ -98,10 +124,10 @@ void loadConfig()
 
     cout << "  [INFO] Loading component options from " << configFileName << endl;
 
+    //
+    // Load execution mode
+
     setCalibrationParameters = config.read_bool("GENERAL","set_calibration_parameters",true,true);
-    useDefaultIntrinsics  = config.read_bool("GENERAL","use_default_intrinsics",true,true);
-    equalizeRGBHistograms = config.read_int("GENERAL","equalize_RGB_histograms",0,true);
-    truncateDepthInfo     = config.read_double("GENERAL","truncateDepthInfo",0,true);
     computeScaleBetweenRGBDSensors  = config.read_bool("GENERAL","compute_scale_between_RGBD_sensors",false,false);
 
     // Check the processing modes activated by the user
@@ -110,90 +136,137 @@ void loadConfig()
         throw std::logic_error("You have to chose between"
            "set_calibration_parameters or compute_sacale_between_RGBD_sensors");
 
+
     //
-    // Load 2D laser scanners info
-    //
+    // Load calibration parameters
 
-    double x, y, z, yaw, pitch, roll;
-
-    CPose3D laser_pose;
-    string sensorLabel;
-    int sensorIndex = 1;
-    bool keepLoading = true;
-
-    cout << "  [INFO] Loaded extrinsic calibration for ";
-
-    while ( keepLoading )
+    if ( setCalibrationParameters )
     {
-        sensorLabel = mrpt::format("HOKUYO%i",sensorIndex);
+        calibConfig.useDefaultIntrinsics  = config.read_bool("CALIBRATION","use_default_intrinsics",true,true);
+        calibConfig.equalizeRGBHistograms = config.read_int("CALIBRATION","equalize_RGB_histograms",0,true);
+        calibConfig.truncateDepthInfo     = config.read_double("CALIBRATION","truncateDepthInfo",0,true);
 
-        if ( config.sectionExists(sensorLabel) )
+        //
+        // Load 2D laser scanners info
+        //
+
+        double x, y, z, yaw, pitch, roll;
+
+        CPose3D laser_pose;
+        string sensorLabel;
+        int sensorIndex = 1;
+        bool keepLoading = true;
+
+        cout << "  [INFO] Loaded extrinsic calibration for ";
+
+        while ( keepLoading )
         {
-            x       = config.read_double(sensorLabel,"x",0,true);
-            y       = config.read_double(sensorLabel,"y",0,true);
-            z       = config.read_double(sensorLabel,"z",0,true);
-            yaw     = DEG2RAD(config.read_double(sensorLabel,"yaw",0,true));
-            pitch	= DEG2RAD(config.read_double(sensorLabel,"pitch",0,true));
-            roll	= DEG2RAD(config.read_double(sensorLabel,"roll",0,true));
+            sensorLabel = mrpt::format("HOKUYO%i",sensorIndex);
 
-            laser_pose.setFromValues(x,y,z,yaw,pitch,roll);
-            v_laser_sensorPoses.push_back( laser_pose );
+            if ( config.sectionExists(sensorLabel) )
+            {
+                x       = config.read_double(sensorLabel,"x",0,true);
+                y       = config.read_double(sensorLabel,"y",0,true);
+                z       = config.read_double(sensorLabel,"z",0,true);
+                yaw     = DEG2RAD(config.read_double(sensorLabel,"yaw",0,true));
+                pitch	= DEG2RAD(config.read_double(sensorLabel,"pitch",0,true));
+                roll	= DEG2RAD(config.read_double(sensorLabel,"roll",0,true));
 
-            cout << sensorLabel << " ";
+                laser_pose.setFromValues(x,y,z,yaw,pitch,roll);
+                v_laser_sensorPoses.push_back( laser_pose );
 
-            sensorIndex++;
+                cout << sensorLabel << " ";
+
+                sensorIndex++;
+            }
+            else
+                keepLoading = false;
         }
-        else
-            keepLoading = false;
+
+        //
+        // Load RGBD devices info
+        //
+
+        sensorIndex = 1;
+        keepLoading = true;
+
+        while ( keepLoading )
+        {
+            sensorLabel = mrpt::format("RGBD_%i",sensorIndex);
+
+            if ( config.sectionExists(sensorLabel) )
+            {
+                x       = config.read_double(sensorLabel,"x",0,true);
+                y       = config.read_double(sensorLabel,"y",0,true);
+                z       = config.read_double(sensorLabel,"z",0,true);
+                yaw     = DEG2RAD(config.read_double(sensorLabel,"yaw",0,true));
+                pitch	= DEG2RAD(config.read_double(sensorLabel,"pitch",0,true));
+                roll	= DEG2RAD(config.read_double(sensorLabel,"roll",0,true));
+
+                bool loadIntrinsic = config.read_bool(sensorLabel,"loadIntrinsic",0,true);
+
+                TRGBD_Sensor RGBD_sensor;
+                RGBD_sensor.pose.setFromValues(x,y,z,yaw,pitch,roll);
+                RGBD_sensor.sensorLabel = sensorLabel;
+                RGBD_sensor.loadIntrinsicParameters = loadIntrinsic;
+
+                config.read_vector(sensorLabel,"depthMultipliers",
+                                   vector<float>(10,1),RGBD_sensor.v_depthMultipliers,false);
+
+                #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+                    // Load CLAMS intrinsic model for depth camera
+                    string DepthIntrinsicModelpath = config.read_string(sensorLabel,"DepthIntrinsicModelpath","",true);
+                    RGBD_sensor.depth_intrinsic_model.load(DepthIntrinsicModelpath);
+                #endif
+
+                v_RGBD_sensors.push_back( RGBD_sensor );
+
+                cout << sensorLabel << " ";
+
+                sensorIndex++;
+            }
+            else
+                keepLoading = false;
+        }
+
+        cout << endl;
     }
 
     //
-    // Load RGBD devices info
-    //
+    // Load parameters for computing the scale between two RGBD sensors
 
-    sensorIndex = 1;
-    keepLoading = true;
-
-    while ( keepLoading )
+    else if ( computeScaleBetweenRGBDSensors )
     {
-        sensorLabel = mrpt::format("RGBD_%i",sensorIndex);
+        computeScaleConfig.resolution = config.read_double("SCALE_BETWEEN_RGBD_SENSORS","resolution",0,true);
+        computeScaleConfig.lowerRange = config.read_double("SCALE_BETWEEN_RGBD_SENSORS","lower_range",0,true);
+        computeScaleConfig.higerRange = config.read_double("SCALE_BETWEEN_RGBD_SENSORS","higher_range",0,true);
+        computeScaleConfig.referenceSensor = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","reference_sensor","",true);
+        computeScaleConfig.o_scaleCalibrationFile = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","scale_calibration_file","",true);
 
-        if ( config.sectionExists(sensorLabel) )
+        vector<string> keys;
+        config.getAllKeys("SCALE_BETWEEN_RGBD_SENSORS",keys);
+
+        int rawlogIndex = 1;
+        bool keepLoading = true;
+
+        while ( keepLoading )
         {
-            x       = config.read_double(sensorLabel,"x",0,true);
-            y       = config.read_double(sensorLabel,"y",0,true);
-            z       = config.read_double(sensorLabel,"z",0,true);
-            yaw     = DEG2RAD(config.read_double(sensorLabel,"yaw",0,true));
-            pitch	= DEG2RAD(config.read_double(sensorLabel,"pitch",0,true));
-            roll	= DEG2RAD(config.read_double(sensorLabel,"roll",0,true));
+            string roughDistance = mrpt::format("rough_distance_%i",rawlogIndex);
+            string rawlog = mrpt::format("rawlog_%i",rawlogIndex);
+            if ( (std::find(keys.begin(), keys.end(), roughDistance) != keys.end())
+                 && (std::find(keys.begin(), keys.end(), rawlog) != keys.end() ) )
+            {
+                computeScaleConfig.v_roughDistances.push_back(
+                            config.read_float("SCALE_BETWEEN_RGBD_SENSORS",roughDistance,0,true) );
+                computeScaleConfig.v_i_rawlogFiles.push_back(
+                            config.read_string("SCALE_BETWEEN_RGBD_SENSORS",rawlog,"",true) );
 
-            bool loadIntrinsic = config.read_bool(sensorLabel,"loadIntrinsic",0,true);
-
-            TRGBD_Sensor RGBD_sensor;
-            RGBD_sensor.pose.setFromValues(x,y,z,yaw,pitch,roll);
-            RGBD_sensor.sensorLabel = sensorLabel;
-            RGBD_sensor.loadIntrinsicParameters = loadIntrinsic;
-
-            config.read_vector(sensorLabel,"depthMultipliers",
-                               vector<float>(10,1),RGBD_sensor.v_depthMultipliers,false);
-
-            #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-                // Load CLAMS intrinsic model for depth camera
-                string DepthIntrinsicModelpath = config.read_string(sensorLabel,"DepthIntrinsicModelpath","",true);
-                RGBD_sensor.depth_intrinsic_model.load(DepthIntrinsicModelpath);
-            #endif                            
-
-            v_RGBD_sensors.push_back( RGBD_sensor );
-
-            cout << sensorLabel << " ";
-
-            sensorIndex++;
-        }
-        else
-            keepLoading = false;
+                rawlogIndex++;
+            }
+            else
+                keepLoading = false;
+         }
     }
-
-    cout << endl;
 
 }
 
@@ -283,22 +356,34 @@ void showUsageInformation()
 
 void processRawlog()
 {
-    CFileGZInputStream i_rawlog(i_rawlogFilename);
+    //
+    // Check input rawlog
+    //
 
-    cout << "  [INFO] Working with " << i_rawlogFilename << endl;
-    if (!equalizeRGBHistograms)
+    if (!mrpt::system::fileExists(calibConfig.i_rawlogFilename))
+    {
+        cerr << "  [ERROR] A rawlog file with name " << calibConfig.i_rawlogFilename;
+        cerr << " doesn't exist." << endl;
+        return;
+    }
+
+    CFileGZInputStream i_rawlog(calibConfig.i_rawlogFilename);
+
+    cout << "  [INFO] Working with " << calibConfig.i_rawlogFilename << endl;
+    if (!calibConfig.equalizeRGBHistograms)
         cout << "  [INFO] Not equalizing RGB histograms" << endl;
-    else if ( equalizeRGBHistograms == 1 )
+    else if ( calibConfig.equalizeRGBHistograms == 1 )
         cout << "  [INFO] Regular RGB histogram equalization" << endl;
-    else if ( equalizeRGBHistograms == 2 )
+    else if ( calibConfig.equalizeRGBHistograms == 2 )
         cout << "  [INFO] CLAHE RGB histogram equalization" << endl;
     else
         cerr << "  [ERROR] Unkwnon RGB histogram equalization" << endl;
 
-    if ( !truncateDepthInfo )
+    if ( !calibConfig.truncateDepthInfo )
         cout << "  [INFO] Not truncating depth information" << endl;
     else
-        cout << "  [INFO] Truncating depth information from a distance of " << truncateDepthInfo << "m" << endl;
+        cout << "  [INFO] Truncating depth information from a distance of "
+             << calibConfig.truncateDepthInfo << "m" << endl;
 
 
 #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
@@ -312,9 +397,10 @@ void processRawlog()
     // Set output rawlog file
     //
 
-    o_rawlogFileName.assign(i_rawlogFilename.begin(), i_rawlogFilename.end()-7);
-    o_rawlogFileName += (onlyHokuyo) ? "_hokuyo" : "";
-    o_rawlogFileName += (onlyRGBD) ? "_rgbd" : "";
+    o_rawlogFileName.assign(calibConfig.i_rawlogFilename.begin(),
+                            calibConfig.i_rawlogFilename.end()-7);
+    o_rawlogFileName += (calibConfig.only2DLaser) ? "_hokuyo" : "";
+    o_rawlogFileName += (calibConfig.onlyRGBD) ? "_rgbd" : "";
     o_rawlogFileName += "_processed.rawlog";
 
     CFileGZOutputStream o_rawlog(o_rawlogFileName);
@@ -361,7 +447,7 @@ void processRawlog()
 
             o_rawlog << obs2D;
         }
-        else if ( !onlyHokuyo )
+        else if ( !calibConfig.only2DLaser )
         {
             // RGBD observation?
 
@@ -375,7 +461,7 @@ void processRawlog()
 
                 obs3D->setSensorPose( sensor.pose );
 
-                if ( useDefaultIntrinsics )
+                if ( calibConfig.useDefaultIntrinsics )
                 {
                     obs3D->cameraParams = defaultCameraParamsDepth;
                     obs3D->cameraParamsIntensity = defaultCameraParamsInt;
@@ -425,13 +511,13 @@ void processRawlog()
                 #endif
 
                 // Truncate Range image and 3D points?
-                if ( truncateDepthInfo )
+                if ( calibConfig.truncateDepthInfo )
                 {
                     size_t N_cols = obs3D->rangeImage.cols();
                     size_t N_rows = obs3D->rangeImage.rows();
                     for ( size_t row = 0; row < N_rows; row++ )
                         for ( size_t col = 0; col < N_cols; col++ )
-                            if( obs3D->rangeImage(row,col) > truncateDepthInfo )
+                            if( obs3D->rangeImage(row,col) > calibConfig.truncateDepthInfo )
                                 obs3D->rangeImage(row,col) = 0;
                 }
 
@@ -439,9 +525,9 @@ void processRawlog()
                 obs3D->project3DPointsFromDepthImage();
 
                 // Equalize histogram of RGB images?
-                if ( equalizeRGBHistograms == 1 )
+                if ( calibConfig.equalizeRGBHistograms == 1 )
                     obs3D->intensityImage.equalizeHistInPlace();
-                else if ( equalizeRGBHistograms == 2 )
+                else if ( calibConfig.equalizeRGBHistograms == 2 )
                     equalizeCLAHE(obs3D);
 
                 o_rawlog << obs3D;
@@ -482,6 +568,37 @@ void processRawlog()
 
 //-----------------------------------------------------------
 //
+//                       computeScale
+//
+//-----------------------------------------------------------
+
+void computeScale()
+{
+    TComputeScaleConfig &csc = computeScaleConfig;
+    size_t N_rawlogs = csc.v_roughDistances.size();
+
+    cout << "  [INFO] Computing depth scale between RGBD sensors with the "
+            "following configuration:" << endl;
+
+    cout << "    Reference sensor: " << csc.referenceSensor << endl;
+    cout << "    Resolution      : " << csc.resolution << endl;
+    cout << "    Lower range     : " << csc.lowerRange << endl;
+    cout << "    Higer range     : " << csc.higerRange << endl;
+    cout << "    Sacale calib. file: " << csc.o_scaleCalibrationFile << endl;
+    cout << "    # of rawlogs    : " << N_rawlogs << endl;
+
+    for ( size_t i_rawlog = 0; i_rawlog < N_rawlogs; i_rawlog++ )
+    {
+        cout << "      Rawlog " << i_rawlog <<" file name     : " <<
+                csc.v_i_rawlogFiles[i_rawlog] << endl;
+        cout << "      Rawlog " << i_rawlog <<" rough distance: " <<
+                csc.v_roughDistances[i_rawlog] << endl;
+    }
+}
+
+
+//-----------------------------------------------------------
+//
 //                          main
 //
 //-----------------------------------------------------------
@@ -513,26 +630,33 @@ int main(int argc, char* argv[])
 
         win3D.unlockAccess3DScene();*/
 
+        cout << endl << "-----------------------------------------------------" << endl;
+        cout << "                Process rawlog" << endl;
+        cout << "           [Object Labeling Tookit]" << endl;
+        cout << "-----------------------------------------------------" << endl << endl;
+
 
         //
         // Load paramteres
         //
 
+        calibConfig.i_rawlogFilename = argv[1];
+        configFileName = argv[2];
+
         if ( argc >= 3 )
         {
-            i_rawlogFilename = argv[1];
-            configFileName = argv[2];
+
 
             for ( size_t arg = 3; arg < argc; arg++ )
             {
-                if ( !strcmp(argv[arg],"-only_hokuyo") )
+                if ( !strcmp(argv[arg],"-only_2DLaser") )
                 {
-                    onlyHokuyo = true;
+                    calibConfig.only2DLaser = true;
                     cout << "  [INFO] Processing only hokuyo observations."  << endl;
                 }
                 else if ( !strcmp(argv[arg],"-only_rgbd") )
                 {
-                    onlyRGBD = true;
+                    calibConfig.onlyRGBD = true;
                     cout << "  [INFO] Processing only rgbd observations."  << endl;
                 }
                 else if ( !strcmp(argv[arg],"-h") )
@@ -562,15 +686,10 @@ int main(int argc, char* argv[])
 
         loadConfig();
 
-
-        if (!mrpt::system::fileExists(i_rawlogFilename))
-        {
-            cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
-            cerr << " doesn't exist." << endl;
-            return -1;
-        }
-
-        processRawlog();
+        if ( setCalibrationParameters )
+            processRawlog();
+        else if ( computeScaleBetweenRGBDSensors )
+            computeScale();
 
         return 0;
 
