@@ -33,6 +33,7 @@
 #include <mrpt/utils/CConfigFile.h>
 #include <mrpt/utils/CFileGZInputStream.h>
 #include <mrpt/utils/CFileGZOutputStream.h>
+#include <mrpt/system/filesystem.h>
 
 #include "opencv2/imgproc/imgproc.hpp"
 
@@ -63,17 +64,26 @@ struct TRGBD_Sensor{
     CPose3D pose;
     string  sensorLabel;
     bool    loadIntrinsicParameters;
+    vector<float>   v_depthMultipliers;
     #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
         // Intrinsic model to undistort the depth image of an RGBD sensor
         clams::DiscreteDepthDistortionModel depth_intrinsic_model;
-    #endif
+    #endif    
 };
 
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
+bool setCalibrationParameters = true;
+bool onlyHokuyo               = false;
+bool onlyRGBD                 = false;
 bool useDefaultIntrinsics;
 int equalizeRGBHistograms;
-double truncateDepthInfo = 0;
+double truncateDepthInfo      = 0;
+
+bool computeScaleBetweenRGBDSensors = false;
+
+string configFileName;
+string i_rawlogFilename;
 
 
 //-----------------------------------------------------------
@@ -82,16 +92,23 @@ double truncateDepthInfo = 0;
 //
 //-----------------------------------------------------------
 
-void loadConfig( const string configFileName )
+void loadConfig()
 {
     CConfigFile config( configFileName );
 
-    cout << "[INFO] Loading component options from " << configFileName << endl;
+    cout << "  [INFO] Loading component options from " << configFileName << endl;
 
-    useDefaultIntrinsics  = config.read_bool("GENERAL","use_default_intrinsics","",true);
+    setCalibrationParameters = config.read_bool("GENERAL","set_calibration_parameters",true,true);
+    useDefaultIntrinsics  = config.read_bool("GENERAL","use_default_intrinsics",true,true);
     equalizeRGBHistograms = config.read_int("GENERAL","equalize_RGB_histograms",0,true);
     truncateDepthInfo     = config.read_double("GENERAL","truncateDepthInfo",0,true);
+    computeScaleBetweenRGBDSensors  = config.read_bool("GENERAL","compute_scale_between_RGBD_sensors",false,false);
 
+    // Check the processing modes activated by the user
+    if (( setCalibrationParameters && computeScaleBetweenRGBDSensors ) // both
+       || ( !setCalibrationParameters && !computeScaleBetweenRGBDSensors ) ) // anyone
+        throw std::logic_error("You have to chose between"
+           "set_calibration_parameters or compute_sacale_between_RGBD_sensors");
 
     //
     // Load 2D laser scanners info
@@ -104,7 +121,7 @@ void loadConfig( const string configFileName )
     int sensorIndex = 1;
     bool keepLoading = true;
 
-    cout << "[INFO] Loaded extrinsic calibration for ";
+    cout << "  [INFO] Loaded extrinsic calibration for ";
 
     while ( keepLoading )
     {
@@ -157,11 +174,14 @@ void loadConfig( const string configFileName )
             RGBD_sensor.sensorLabel = sensorLabel;
             RGBD_sensor.loadIntrinsicParameters = loadIntrinsic;
 
+            config.read_vector(sensorLabel,"depthMultipliers",
+                               vector<float>(10,1),RGBD_sensor.v_depthMultipliers,false);
+
             #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
                 // Load CLAMS intrinsic model for depth camera
                 string DepthIntrinsicModelpath = config.read_string(sensorLabel,"DepthIntrinsicModelpath","",true);
                 RGBD_sensor.depth_intrinsic_model.load(DepthIntrinsicModelpath);
-            #endif
+            #endif                            
 
             v_RGBD_sensors.push_back( RGBD_sensor );
 
@@ -257,6 +277,211 @@ void showUsageInformation()
 
 //-----------------------------------------------------------
 //
+//                      processRawlog
+//
+//-----------------------------------------------------------
+
+void processRawlog()
+{
+    CFileGZInputStream i_rawlog(i_rawlogFilename);
+
+    cout << "  [INFO] Working with " << i_rawlogFilename << endl;
+    if (!equalizeRGBHistograms)
+        cout << "  [INFO] Not equalizing RGB histograms" << endl;
+    else if ( equalizeRGBHistograms == 1 )
+        cout << "  [INFO] Regular RGB histogram equalization" << endl;
+    else if ( equalizeRGBHistograms == 2 )
+        cout << "  [INFO] CLAHE RGB histogram equalization" << endl;
+    else
+        cerr << "  [ERROR] Unkwnon RGB histogram equalization" << endl;
+
+    if ( !truncateDepthInfo )
+        cout << "  [INFO] Not truncating depth information" << endl;
+    else
+        cout << "  [INFO] Truncating depth information from a distance of " << truncateDepthInfo << "m" << endl;
+
+
+#ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+    cout << "  [INFO] Undistorting depth images using CLAMS intrinsic calibartion" << endl;
+#endif
+    cout.flush();
+
+    string o_rawlogFileName;
+
+    //
+    // Set output rawlog file
+    //
+
+    o_rawlogFileName.assign(i_rawlogFilename.begin(), i_rawlogFilename.end()-7);
+    o_rawlogFileName += (onlyHokuyo) ? "_hokuyo" : "";
+    o_rawlogFileName += (onlyRGBD) ? "_rgbd" : "";
+    o_rawlogFileName += "_processed.rawlog";
+
+    CFileGZOutputStream o_rawlog(o_rawlogFileName);
+
+    // Default params
+    TCamera defaultCameraParamsDepth;
+    defaultCameraParamsDepth.nrows = 488;
+    defaultCameraParamsDepth.scaleToResolution(320,244);
+
+    TCamera defaultCameraParamsInt;
+    defaultCameraParamsInt.scaleToResolution(320,240);
+
+    //
+    // Process rawlog
+    //
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+    {
+        // Check that it is an observation
+        if ( !obs )
+            continue;
+
+        // Show progress as dots
+
+        if ( !(obsIndex % 200) )
+        {
+            if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
+            cout.flush();
+        }
+
+        // Observation from a laser range scan device
+
+        if ( obs->sensorLabel == "HOKUYO1" )
+        {
+            CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
+            obs2D->load();
+
+            obs2D->setSensorPose(v_laser_sensorPoses[0]);
+
+            o_rawlog << obs2D;
+        }
+        else if ( !onlyHokuyo )
+        {
+            // RGBD observation?
+
+            size_t RGBD_sensorIndex = getSensorPos(obs->sensorLabel);
+
+            if ( RGBD_sensorIndex >= 0 )
+            {
+                TRGBD_Sensor &sensor = v_RGBD_sensors[RGBD_sensorIndex];
+                CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+                obs3D->load();
+
+                obs3D->setSensorPose( sensor.pose );
+
+                if ( useDefaultIntrinsics )
+                {
+                    obs3D->cameraParams = defaultCameraParamsDepth;
+                    obs3D->cameraParamsIntensity = defaultCameraParamsInt;
+                }
+                else
+                {
+                    if ( sensor.loadIntrinsicParameters )
+                    {
+                        CConfigFile config( configFileName );
+
+                        obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_depth",config);
+                        obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_intensity",config);
+                    }
+                    else
+                    {
+                        obs3D->cameraParams.scaleToResolution(320,244);
+                        obs3D->cameraParamsIntensity.scaleToResolution(320,240);
+                    }
+
+                }
+
+                // Apply depth intrinsic calibration?
+                #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+                    // Undistort Depth image
+                    Eigen::MatrixXf depthMatrix = obs3D->rangeImage;
+
+                    v_RGBD_sensors[RGBD_sensorIndex].depth_intrinsic_model.undistort(&depthMatrix);
+                    if ( obs->sensorLabel == "RGBD_4" )
+                    {
+                        //depthMatrix = depthMatrix*1.15;
+                        size_t N_cols = depthMatrix.cols();
+                        size_t N_rows = depthMatrix.rows();
+                        for ( size_t row = 0; row < N_rows; row++ )
+                            for ( size_t col = 0; col < N_cols; col++ )
+                            {
+                                int pos = std::floor(depthMatrix(row,col));
+                                vector<float> &v = v_RGBD_sensors[RGBD_sensorIndex].v_depthMultipliers;
+                                if ( !pos )
+                                    depthMatrix(row,col) *= v[0];
+                                else if ( pos >= v.size() )
+                                    depthMatrix(row,col) *= v[v.size()-1];
+                                else
+                                    depthMatrix(row,col) *= v[pos]+(v[pos+1]-v[pos])*(1-(depthMatrix(row,col)-pos));
+                            }
+                    }
+                    obs3D->rangeImage = depthMatrix;
+                #endif
+
+                // Truncate Range image and 3D points?
+                if ( truncateDepthInfo )
+                {
+                    size_t N_cols = obs3D->rangeImage.cols();
+                    size_t N_rows = obs3D->rangeImage.rows();
+                    for ( size_t row = 0; row < N_rows; row++ )
+                        for ( size_t col = 0; col < N_cols; col++ )
+                            if( obs3D->rangeImage(row,col) > truncateDepthInfo )
+                                obs3D->rangeImage(row,col) = 0;
+                }
+
+                // Project 3D points from the depth image
+                obs3D->project3DPointsFromDepthImage();
+
+                // Equalize histogram of RGB images?
+                if ( equalizeRGBHistograms == 1 )
+                    obs3D->intensityImage.equalizeHistInPlace();
+                else if ( equalizeRGBHistograms == 2 )
+                    equalizeCLAHE(obs3D);
+
+                o_rawlog << obs3D;
+
+                /*if ( onlyRGBD )
+                    o_rawlogRGBD.addObservationMemoryReference(obs3D);
+                else
+                    o_rawlog.addObservationMemoryReference(obs3D);*/
+
+                // Visualization purposes
+
+                /*
+                mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
+
+                mrpt::slam::CColouredPointsMap colouredMap;
+                colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
+                colouredMap.loadFromRangeScan( *obs3D );
+
+                gl_points->loadFromPointsMap( &colouredMap );
+
+                scene->insert( gl_points );
+
+                win3D.unlockAccess3DScene();
+                win3D.repaint();
+                win3D.waitForKey();*/
+            }
+        }
+
+    }
+
+    if ( !obsIndex )
+        cout << endl << "No observations loaded nor processed. Erroneous rawlog name?" << endl;
+    else
+        cout << endl << "[INFO] Rawlog saved as " << o_rawlogFileName << endl;
+
+}
+
+
+//-----------------------------------------------------------
+//
 //                          main
 //
 //-----------------------------------------------------------
@@ -288,25 +513,6 @@ int main(int argc, char* argv[])
 
         win3D.unlockAccess3DScene();*/
 
-        //
-        // Useful variables
-        //
-
-        string hokuyo = "HOKUYO1";
-        bool onlyHokuyo = false;
-        bool onlyRGBD = false;
-
-        string configFileName;
-
-        string i_rawlogFilename;
-        string o_rawlogFileName;
-
-        TCamera defaultCameraParamsDepth;
-        defaultCameraParamsDepth.nrows = 488;
-        defaultCameraParamsDepth.scaleToResolution(320,244);
-
-        TCamera defaultCameraParamsInt;
-        defaultCameraParamsInt.scaleToResolution(320,240);
 
         //
         // Load paramteres
@@ -322,12 +528,12 @@ int main(int argc, char* argv[])
                 if ( !strcmp(argv[arg],"-only_hokuyo") )
                 {
                     onlyHokuyo = true;
-                    cout << "[INFO] Processing only hokuyo observations."  << endl;
+                    cout << "  [INFO] Processing only hokuyo observations."  << endl;
                 }
                 else if ( !strcmp(argv[arg],"-only_rgbd") )
                 {
                     onlyRGBD = true;
-                    cout << "[INFO] Processing only rgbd observations."  << endl;
+                    cout << "  [INFO] Processing only rgbd observations."  << endl;
                 }
                 else if ( !strcmp(argv[arg],"-h") )
                 {
@@ -336,7 +542,7 @@ int main(int argc, char* argv[])
                 }
                 else
                 {
-                    cout << "[ERROR] Unknown option " << argv[arg] << endl;
+                    cout << "  [ERROR] Unknown option " << argv[arg] << endl;
                     showUsageInformation();
                     return -1;
                 }
@@ -354,174 +560,17 @@ int main(int argc, char* argv[])
         // Load config information
         //
 
-        loadConfig( configFileName );
+        loadConfig();
 
-        //
-        // Open rawlog file
-        //
 
-        CFileGZInputStream i_rawlog(i_rawlogFilename);
-        /*if (!i_rawlog.loadFromRawLogFile(i_rawlogFilename))
-            throw std::runtime_error("Couldn't open rawlog dataset file for input...");*/
-
-        cout << "[INFO] Working with " << i_rawlogFilename << endl;
-        if (!equalizeRGBHistograms)
-            cout << "[INFO] Not equalizing RGB histograms" << endl;
-        else if ( equalizeRGBHistograms == 1 )
-            cout << "[INFO] Regular RGB histogram equalization" << endl;
-        else if ( equalizeRGBHistograms == 2 )
-            cout << "[INFO] CLAHE RGB histogram equalization" << endl;
-        else
-            cerr << "[ERROR] Unkwnon RGB histogram equalization" << endl;
-
-        if ( !truncateDepthInfo )
-            cout << "[INFO] Not truncating depth information" << endl;
-        else
-            cout << "[INFO] Truncating depth information from a distance of " << truncateDepthInfo << "m" << endl;
-
-        cout.flush();
-
-        //
-        // Set output rawlog file
-        //
-
-        o_rawlogFileName.assign(i_rawlogFilename.begin(), i_rawlogFilename.end()-7);
-        o_rawlogFileName += (onlyHokuyo) ? "_hokuyo" : "";
-        o_rawlogFileName += (onlyRGBD) ? "_rgbd" : "";
-        o_rawlogFileName += "_processed.rawlog";
-
-        CFileGZOutputStream o_rawlog(o_rawlogFileName);
-
-        //
-        // Process rawlog
-        //
-
-        CActionCollectionPtr action;
-        CSensoryFramePtr observations;
-        CObservationPtr obs;
-        size_t obsIndex = 0;
-
-        while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+        if (!mrpt::system::fileExists(i_rawlogFilename))
         {
-            // Check that it is an observation
-            if ( !obs )
-                continue;
-
-            // Show progress as dots
-
-            if ( !(obsIndex % 200) )
-            {
-                if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
-                cout.flush();
-            }
-
-            // Observation from a laser range scan device
-
-            if ( obs->sensorLabel == hokuyo )
-            {
-                CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
-                obs2D->load();
-
-                obs2D->setSensorPose(v_laser_sensorPoses[0]);
-
-                o_rawlog << obs2D;
-            }
-            else if ( !onlyHokuyo )
-            {
-                // RGBD observation?
-
-                size_t RGBD_sensorIndex = getSensorPos(obs->sensorLabel);
-
-                if ( RGBD_sensorIndex >= 0 )
-                {
-                    TRGBD_Sensor &sensor = v_RGBD_sensors[RGBD_sensorIndex];
-                    CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-                    obs3D->load();
-
-                    obs3D->setSensorPose( sensor.pose );
-
-                    if ( useDefaultIntrinsics )
-                    {
-                        obs3D->cameraParams = defaultCameraParamsDepth;
-                        obs3D->cameraParamsIntensity = defaultCameraParamsInt;
-                    }
-                    else
-                    {
-                        if ( sensor.loadIntrinsicParameters )
-                        {
-                            CConfigFile config( configFileName );
-
-                            obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_depth",config);
-                            obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_intensity",config);
-                        }
-                        else
-                        {
-                            obs3D->cameraParams.scaleToResolution(320,244);
-                            obs3D->cameraParamsIntensity.scaleToResolution(320,240);
-                        }
-
-                    }
-
-                    // Apply depth intrinsic calibration?
-                    #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-                        // Undistort Depth image
-                        Eigen::MatrixXf depthMatrix = obs3D->rangeImage;
-                        v_RGBD_sensors[RGBD_sensorIndex].depth_intrinsic_model.undistort(&depthMatrix);
-                        obs3D->rangeImage = depthMatrix;
-                    #endif
-
-                    // Truncate Range image and 3D points?
-                    if ( truncateDepthInfo )
-                    {
-                        size_t N_cols = obs3D->rangeImage.cols();
-                        size_t N_rows = obs3D->rangeImage.rows();
-                        for ( size_t row = 0; row < N_rows; row++ )
-                            for ( size_t col = 0; col < N_cols; col++ )
-                                if( obs3D->rangeImage(row,col) > truncateDepthInfo )
-                                    obs3D->rangeImage(row,col) = 0;
-                    }
-
-                    // Project 3D points from the depth image
-                    obs3D->project3DPointsFromDepthImage();
-
-                    // Equalize histogram of RGB images?
-                    if ( equalizeRGBHistograms == 1 )
-                        obs3D->intensityImage.equalizeHistInPlace();
-                    else if ( equalizeRGBHistograms == 2 )
-                        equalizeCLAHE(obs3D);
-
-                    o_rawlog << obs3D;
-
-                    /*if ( onlyRGBD )
-                        o_rawlogRGBD.addObservationMemoryReference(obs3D);
-                    else
-                        o_rawlog.addObservationMemoryReference(obs3D);*/
-
-                    // Visualization purposes
-
-                    /*
-                    mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
-
-                    mrpt::slam::CColouredPointsMap colouredMap;
-                    colouredMap.colorScheme.scheme = CColouredPointsMap::cmFromIntensityImage;
-                    colouredMap.loadFromRangeScan( *obs3D );
-
-                    gl_points->loadFromPointsMap( &colouredMap );
-
-                    scene->insert( gl_points );
-
-                    win3D.unlockAccess3DScene();
-                    win3D.repaint();
-                    win3D.waitForKey();*/
-                }
-            }
-
+            cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
+            cerr << " doesn't exist." << endl;
+            return -1;
         }
 
-        if ( !obsIndex )
-            cout << endl << "No observations loaded nor processed. Erroneous rawlog name?" << endl;
-        else
-            cout << endl << "[INFO] Rawlog saved as " << o_rawlogFileName << endl;
+        processRawlog();
 
         return 0;
 

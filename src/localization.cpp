@@ -1791,9 +1791,12 @@ int main(int argc, char **argv)
                             {
                                 vector<T3DRangeScan> v_aligned;
                                 v_aligned.push_back(v_obs[0]);
+                                CObservation3DRangeScan obs3D;
+                                TTimeStamp t1 = v_obs[0].obs->timestamp;
 
                                 for ( size_t i_sensor = 1; i_sensor < N_sensors; i_sensor++ )
                                 {
+                                    cout << "Time diff: " << timeDifference(t1,v_obs[i_sensor].obs->timestamp) << endl;
                                     CPose3D estimated_pose;
                                     //v_obs[i_sensor].obs->getSensorPose(estimated_pose);
 
