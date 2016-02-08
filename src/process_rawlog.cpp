@@ -489,35 +489,42 @@ void processRawlog()
     CFileGZInputStream i_rawlog(calibConfig.i_rawlogFilename);
 
     cout << "  [INFO] Working with " << calibConfig.i_rawlogFilename << endl;
+
+    cout << "  [INFO] Equalizing RGB histograms   : ";
+
     if (!calibConfig.equalizeRGBHistograms)
-        cout << "  [INFO] Not equalizing RGB histograms" << endl;
+        cout << "off" << endl;
     else if ( calibConfig.equalizeRGBHistograms == 1 )
-        cout << "  [INFO] Regular RGB histogram equalization" << endl;
+        cout << "on" << endl;
     else if ( calibConfig.equalizeRGBHistograms == 2 )
-        cout << "  [INFO] CLAHE RGB histogram equalization" << endl;
+        cout << "on (CLAHE)" << endl;
     else
-        cerr << "  [ERROR] Unkwnon RGB histogram equalization" << endl;
+        cout << "off (unkwnon method specified)" << endl;
+
+    cout << "  [INFO] Truncating depth information: ";
 
     if ( !calibConfig.truncateDepthInfo )
-        cout << "  [INFO] Not truncating depth information" << endl;
+        cout << "off" << endl;
     else
-        cout << "  [INFO] Truncating depth information from a distance of "
-             << calibConfig.truncateDepthInfo << "m" << endl;
+        cout << "on (from " << calibConfig.truncateDepthInfo << "m)" << endl;
+
+    cout << "  [INFO] Scaling depth info          : ";
 
     if ( !calibConfig.scaleDepthInfo )
-        cout << "  [INFO] Not scaling depth info" << endl;
+        cout << "off" << endl;
     else
-        cout << "  [INFO] Scaling depth info " << endl;
+        cout << "on" << endl;
 
+    cout << "  [INFO] Apply CLAMS calibration     : ";
 
     if ( calibConfig.applyCLAMS )
 #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-        cout << "  [INFO] Undistorting depth images using CLAMS intrinsic calibartion" << endl;
+        cout << "on" << endl;
 #else
-       cout << "  [INFO] Not undistorting depth images using CLAMS, CLAMS is not available" << endl;
+       cout << "off (CLAMS is not available in the system)" << endl;
 #endif
     else
-        cout << "  [INFO] Not undistorting depth images using CLAMS." << endl;
+        cout << "off" << endl;
 
     cout.flush();
 
