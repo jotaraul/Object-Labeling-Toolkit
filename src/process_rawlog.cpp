@@ -73,6 +73,8 @@ struct TCalibrationConfig{
     bool only2DLaser;
     bool onlyRGBD;
     bool useDefaultIntrinsics;
+    bool applyCLAMS;
+    bool scaleDepthInfo;
     int  equalizeRGBHistograms;
     double truncateDepthInfo;
     string i_rawlogFilename;
@@ -92,6 +94,10 @@ struct TScaleCalibrationConfig{
     string referenceSensor;
     string scaledSensor;
     string o_scaleCalibrationFile;
+    bool   generateInverseScale;
+    bool   computeTransitiveScale;
+    string referenceScaleCalibrationFile;
+    string scaledScaleCalibrationFile;
     vector<string> v_referenceRawlogs;
     vector<string> v_scaledRawlogs;
 
@@ -99,20 +105,79 @@ struct TScaleCalibrationConfig{
     {}
 } scaleCalibrationConfig;
 
+struct TScaleCalibration{
+
+    float resolution;
+    float lowerRange;
+    float higerRange;
+    string referenceSensor;
+    string scaledSensor;
+    string i_scaleCalibrationFile;
+    CVectorFloat scaleMultipliers;
+
+    TScaleCalibration()
+    {}
+};
+
+vector<TScaleCalibration> v_scaleCalibrations;
+
 struct TRGBD_Sensor{
     CPose3D pose;
     string  sensorLabel;
     bool    loadIntrinsicParameters;
-    vector<float>   v_depthMultipliers;
-    #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-        // Intrinsic model to undistort the depth image of an RGBD sensor
-        clams::DiscreteDepthDistortionModel depth_intrinsic_model;
-    #endif    
+    int     N_obsProcessed;
+#ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+    // Intrinsic model to undistort the depth image of an RGBD sensor
+    clams::DiscreteDepthDistortionModel depth_intrinsic_model;
+#endif
+    TRGBD_Sensor() : N_obsProcessed(0)
+    {}
 };
 
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
 vector<CPose3D> v_laser_sensorPoses; // Poses of the 2D laser scaners in the robot
+
+
+//-----------------------------------------------------------
+//
+//                loadScaleCalibrationFromFile
+//
+//-----------------------------------------------------------
+
+void loadScaleCalibrationFromFile(const string fileName )
+{
+    TScaleCalibration sc;
+
+    sc.i_scaleCalibrationFile = fileName;
+
+    ifstream f( sc.i_scaleCalibrationFile.c_str() );
+
+    if ( !f.is_open() )
+    {
+        cerr << endl << "    [ERROR] Opening file " << sc.i_scaleCalibrationFile << endl;
+        return;
+    }
+
+    string bin;
+    f >> bin >> sc.referenceSensor;
+    f >> bin >> sc.scaledSensor;
+    f >> bin >> sc.resolution;
+    f >> bin >> sc.lowerRange;
+    f >> bin >> sc.higerRange;
+
+    int N_scales = 1+1/sc.resolution*(sc.higerRange-sc.lowerRange);
+
+    sc.scaleMultipliers.resize(N_scales);
+
+    for ( int i = 0; i < N_scales; i++ )
+    {
+        f >> sc.scaleMultipliers(i);
+        //cout << "Scale:" << sc.scaleMultipliers(i) << endl;
+    }
+
+    v_scaleCalibrations.push_back(sc);
+}
 
 
 //-----------------------------------------------------------
@@ -147,7 +212,10 @@ void loadConfig()
     {
         calibConfig.useDefaultIntrinsics  = config.read_bool("CALIBRATION","use_default_intrinsics",true,true);
         calibConfig.equalizeRGBHistograms = config.read_int("CALIBRATION","equalize_RGB_histograms",0,true);
-        calibConfig.truncateDepthInfo     = config.read_double("CALIBRATION","truncateDepthInfo",0,true);
+        calibConfig.truncateDepthInfo     = config.read_double("CALIBRATION","truncate_depth_info",0,true);
+        calibConfig.applyCLAMS            = config.read_bool("CALIBRATION","apply_CLAMS_Calibration_if_available",false,true);
+        calibConfig.scaleDepthInfo        = config.read_bool("CALIBRATION","scale_depth_info",false,true);
+
 
         //
         // Load 2D laser scanners info
@@ -206,6 +274,11 @@ void loadConfig()
                 pitch	= DEG2RAD(config.read_double(sensorLabel,"pitch",0,true));
                 roll	= DEG2RAD(config.read_double(sensorLabel,"roll",0,true));
 
+                string depthScaleModelPath = config.read_string(sensorLabel,"depth_scale_model_path","",false);
+
+                if ( !depthScaleModelPath.empty() )
+                    loadScaleCalibrationFromFile(depthScaleModelPath);
+
                 bool loadIntrinsic = config.read_bool(sensorLabel,"loadIntrinsic",0,true);
 
                 TRGBD_Sensor RGBD_sensor;
@@ -213,14 +286,14 @@ void loadConfig()
                 RGBD_sensor.sensorLabel = sensorLabel;
                 RGBD_sensor.loadIntrinsicParameters = loadIntrinsic;
 
-                config.read_vector(sensorLabel,"depthMultipliers",
-                                   vector<float>(10,1),RGBD_sensor.v_depthMultipliers,false);
-
-                #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+#ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+                if ( calibConfig.applyCLAMS )
+                {
                     // Load CLAMS intrinsic model for depth camera
                     string DepthIntrinsicModelpath = config.read_string(sensorLabel,"DepthIntrinsicModelpath","",true);
                     RGBD_sensor.depth_intrinsic_model.load(DepthIntrinsicModelpath);
-                #endif
+                }
+#endif
 
                 v_RGBD_sensors.push_back( RGBD_sensor );
 
@@ -248,6 +321,21 @@ void loadConfig()
         scc.referenceSensor = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","reference_sensor","",true);
         scc.scaledSensor = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","scaled_sensor","",true);
         scc.o_scaleCalibrationFile = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","scale_calibration_file","",true);
+        scc.generateInverseScale = config.read_bool("SCALE_BETWEEN_RGBD_SENSORS","generate_inverse_scale",false,true);
+        scc.computeTransitiveScale = config.read_bool("SCALE_BETWEEN_RGBD_SENSORS","compute_transitive_scale",false,true);
+
+        if ( scc.computeTransitiveScale )
+        {
+            scc.referenceScaleCalibrationFile = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","reference_scale_calibration_file","",true);;
+            scc.scaledScaleCalibrationFile =  config.read_string("SCALE_BETWEEN_RGBD_SENSORS","scaled_scale_calibration_file","",true);;
+        }
+
+        if ( scc.generateInverseScale )
+        {
+            string aux = scc.referenceSensor;
+            scc.referenceSensor = scc.scaledSensor;
+            scc.scaledSensor = aux;
+        }
 
         vector<string> keys;
         config.getAllKeys("SCALE_BETWEEN_RGBD_SENSORS",keys);
@@ -273,6 +361,13 @@ void loadConfig()
             else
                 keepLoading = false;
          }
+
+        if ( scc.generateInverseScale )
+        {
+            vector<string> aux = scc.v_referenceRawlogs;
+            scc.v_referenceRawlogs = scc.v_scaledRawlogs;
+            scc.v_scaledRawlogs = aux;
+        }
     }
 
 }
@@ -280,11 +375,28 @@ void loadConfig()
 
 //-----------------------------------------------------------
 //
+//                getSensorPosInScalecalib
+//
+//-----------------------------------------------------------
+
+int getSensorPosInScalecalib( const string label)
+{
+    for ( size_t i = 0; i < v_scaleCalibrations.size(); i++ )
+    {
+        if ( v_scaleCalibrations[i].scaledSensor == label )
+            return i;
+    }
+
+    return -1;
+}
+
+//-----------------------------------------------------------
+//
 //                      getSensorPos
 //
 //-----------------------------------------------------------
 
-size_t getSensorPos( const string label )
+int getSensorPos( const string label )
 {
     for ( size_t i = 0; i < v_RGBD_sensors.size(); i++ )
     {
@@ -392,10 +504,21 @@ void processRawlog()
         cout << "  [INFO] Truncating depth information from a distance of "
              << calibConfig.truncateDepthInfo << "m" << endl;
 
+    if ( !calibConfig.scaleDepthInfo )
+        cout << "  [INFO] Not scaling depth info" << endl;
+    else
+        cout << "  [INFO] Scaling depth info " << endl;
 
+
+    if ( calibConfig.applyCLAMS )
 #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
-    cout << "  [INFO] Undistorting depth images using CLAMS intrinsic calibartion" << endl;
+        cout << "  [INFO] Undistorting depth images using CLAMS intrinsic calibartion" << endl;
+#else
+       cout << "  [INFO] Not undistorting depth images using CLAMS, CLAMS is not available" << endl;
 #endif
+    else
+        cout << "  [INFO] Not undistorting depth images using CLAMS." << endl;
+
     cout.flush();
 
     string o_rawlogFileName;
@@ -428,6 +551,8 @@ void processRawlog()
     CSensoryFramePtr observations;
     CObservationPtr obs;
     size_t obsIndex = 0;
+
+    cout << "    Process: ";
 
     while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
     {
@@ -466,6 +591,8 @@ void processRawlog()
                 CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
                 obs3D->load();
 
+                sensor.N_obsProcessed++;
+
                 obs3D->setSensorPose( sensor.pose );
 
                 if ( calibConfig.useDefaultIntrinsics )
@@ -491,31 +618,47 @@ void processRawlog()
                 }
 
                 // Apply depth intrinsic calibration?
-                #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+#ifdef USING_CLAMS_INTRINSIC_CALIBRATION
+                if ( calibConfig.applyCLAMS )
+                {
                     // Undistort Depth image
                     Eigen::MatrixXf depthMatrix = obs3D->rangeImage;
-
                     v_RGBD_sensors[RGBD_sensorIndex].depth_intrinsic_model.undistort(&depthMatrix);
-                    /*if ( obs->sensorLabel == "RGBD_4" )
+                    obs3D->rangeImage = depthMatrix;
+                }
+#endif
+
+                // Scale depth info?
+                if ( calibConfig.scaleDepthInfo )
+                {
+                    int pos = getSensorPosInScalecalib(obs3D->sensorLabel);
+
+                    if ( pos >= 0 )
                     {
-                        //depthMatrix = depthMatrix*1.15;
-                        size_t N_cols = depthMatrix.cols();
-                        size_t N_rows = depthMatrix.rows();
+                        TScaleCalibration &sc = v_scaleCalibrations[pos];
+                        int offset = std::floor(sc.lowerRange*(1/sc.resolution));
+
+                        size_t N_cols = obs3D->rangeImage.cols();
+                        size_t N_rows = obs3D->rangeImage.rows();
                         for ( size_t row = 0; row < N_rows; row++ )
                             for ( size_t col = 0; col < N_cols; col++ )
                             {
-                                int pos = std::floor(depthMatrix(row,col));
-                                vector<float> &v = v_RGBD_sensors[RGBD_sensorIndex].v_depthMultipliers;
-                                if ( !pos )
-                                    depthMatrix(row,col) *= v[0];
-                                else if ( pos >= v.size() )
-                                    depthMatrix(row,col) *= v[v.size()-1];
+                                float value = obs3D->rangeImage(row,col);
+
+                                if ( value < sc.lowerRange )
+                                    obs3D->rangeImage(row,col) *= sc.scaleMultipliers(0);
+                                else if ( value > sc.higerRange )
+                                    obs3D->rangeImage(row,col) *= sc.scaleMultipliers(sc.scaleMultipliers.rows()-1);
                                 else
-                                    depthMatrix(row,col) *= v[pos]+(v[pos+1]-v[pos])*(1-(depthMatrix(row,col)-pos));
+                                {
+                                    int pos = std::floor(value*(1/sc.resolution));
+                                    pos -= offset;
+
+                                    obs3D->rangeImage(row,col) *= sc.scaleMultipliers(pos);
+                                }
                             }
-                    }*/
-                    obs3D->rangeImage = depthMatrix;
-                #endif
+                    }
+                }
 
                 // Truncate Range image and 3D points?
                 if ( calibConfig.truncateDepthInfo )
@@ -565,7 +708,13 @@ void processRawlog()
 
     }
 
-    cout << endl << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl;
+    cout << endl << "    Number of RGBD observations processed: " << endl;
+
+    for ( size_t i = 0; i < v_RGBD_sensors.size(); i++ )
+        cout << "      " << v_RGBD_sensors[i].sensorLabel
+             << ": " << v_RGBD_sensors[i].N_obsProcessed << endl;
+
+    cout << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl << endl;
 
 }
 
@@ -599,7 +748,7 @@ float computeMeanDepthFromRawlog(const string rawlogFile, const string sensorLab
             continue;
         // RGBD observation? and from the sensor which data are we processing?
 
-        if ( obs->sensorLabel == sensorLabel )
+        //if ( obs->sensorLabel == sensorLabel )
         {
             CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
             obs3D->load();
@@ -632,6 +781,47 @@ float computeMeanDepthFromRawlog(const string rawlogFile, const string sensorLab
 
 }
 
+//-----------------------------------------------------------
+//
+//               saveScaleCalibrationToFile
+//
+//-----------------------------------------------------------
+
+void saveScaleCalibrationToFile(CVectorFloat &v_meanDepths,
+                                CVectorFloat &v_depthScales)
+{
+    TScaleCalibrationConfig &scc = scaleCalibrationConfig;
+
+    ofstream f( scc.o_scaleCalibrationFile.c_str() );
+
+    if ( !f.is_open() )
+        cout << "    [ERROR] Opening file " << scc.o_scaleCalibrationFile << endl;
+
+    cout << "  [INFO] Saving depth scale calibration results to "
+         << scc.o_scaleCalibrationFile << endl;
+
+    f << "Reference_sensor " << scc.referenceSensor << endl;
+    f << "Scaled_sensor " << scc.scaledSensor << endl;
+    f << "Resolution " << scc.resolution << endl;
+    f << "Lower_depth " << scc.lowerRange << endl;
+    f << "Higher_depth " << scc.higerRange << endl;
+
+    CVectorFloat xs,ys;
+    linspace(scc.lowerRange,scc.higerRange,
+             1+1/scc.resolution*(scc.higerRange-scc.lowerRange),
+             xs);
+
+    mrpt::math::leastSquareLinearFit(xs,ys,v_meanDepths,v_depthScales);
+
+    for ( int i = 0; i < ys.rows(); i++ )
+    {
+        //cout << "Depth: " << xs(i) << " scale:" << ys(i) << endl;
+        f << ys(i) << " ";
+    }
+
+    cout << "  [INFO] Done! " << endl << endl;
+}
+
 
 //-----------------------------------------------------------
 //
@@ -653,6 +843,7 @@ void computeScale()
             "following configuration:" << endl;
 
     cout << "    Reference sensor: " << scc.referenceSensor << endl;
+    cout << "    Scaled sensor   : " << scc.scaledSensor << endl;
     cout << "    Resolution      : " << scc.resolution << endl;
     cout << "    Lower range     : " << scc.lowerRange << endl;
     cout << "    Higer range     : " << scc.higerRange << endl;
@@ -701,7 +892,7 @@ void computeScale()
         double scaledSensorMeanDepth = computeMeanDepthFromRawlog(scc.v_scaledRawlogs[i_rawlog],
                                                                scc.scaledSensor );
         v_meanDepths(i_rawlog) = scaledSensorMeanDepth;
-        v_depthScales(i_rawlog) = scaledSensorMeanDepth/refSensorMeanDepth;
+        v_depthScales(i_rawlog) = refSensorMeanDepth/scaledSensorMeanDepth;
 
         cout << "    refSensorMeanDepth: " << refSensorMeanDepth <<
                 " scaledSensorMeanDepth: " << scaledSensorMeanDepth <<
@@ -709,7 +900,53 @@ void computeScale()
     }
 
     //
-    // Generate depth scale calibration file
+    // Save depth scale calibration to file
+
+    saveScaleCalibrationToFile(v_meanDepths,v_depthScales);
+}
+
+
+//-----------------------------------------------------------
+//
+//                          main
+//
+//-----------------------------------------------------------
+
+void computeTransitiveScale()
+{
+
+    //
+    // Show configuration parameters
+
+    TScaleCalibrationConfig &scc = scaleCalibrationConfig;
+
+    cout << "  [INFO] Computing transitive depth scale between RGBD sensors with the "
+            "following configuration:" << endl;
+
+    cout << "    Reference scale calibration file: " << scc.referenceScaleCalibrationFile << endl;
+    cout << "    Scaled scale calibration file   : " << scc.scaledScaleCalibrationFile << endl;
+    cout << "    Reference sensor                : " << scc.referenceSensor << endl;
+    cout << "    Scaled sensor                   : " << scc.scaledSensor << endl;
+
+    loadScaleCalibrationFromFile( scc.referenceScaleCalibrationFile );
+    loadScaleCalibrationFromFile( scc.scaledScaleCalibrationFile );
+
+    if ( v_scaleCalibrations[0].referenceSensor != scc.referenceSensor )
+        cout << "[WARNING!] Reference sensor in " << scc.referenceScaleCalibrationFile
+             << " doesn't match reference sensor label set in the configuration file" << endl;
+
+    if ( v_scaleCalibrations[1].referenceSensor != scc.scaledSensor )
+        cout << "[WARNING!] Reference sensor in " << scc.referenceScaleCalibrationFile
+             << " doesn't match scaled sensor label set in the configuration file" << endl;
+
+    if ( v_scaleCalibrations[0].resolution != v_scaleCalibrations[1].resolution )
+        throw logic_error("Scale calibration files have a different resolution.");
+
+    if ( v_scaleCalibrations[0].lowerRange != v_scaleCalibrations[1].lowerRange )
+        throw logic_error("Scale calibration files have a different lowerRange.");
+
+    if ( v_scaleCalibrations[0].higerRange != v_scaleCalibrations[1].higerRange )
+        throw logic_error("Scale calibration files have a different higerRange.");
 
     ofstream f( scc.o_scaleCalibrationFile.c_str() );
 
@@ -719,28 +956,19 @@ void computeScale()
     cout << "  [INFO] Saving depth scale calibration results to "
          << scc.o_scaleCalibrationFile << endl;
 
-    f << "Reference_sensor: " << scc.referenceSensor << endl;
-    f << "Scaled_sensor   : " << scc.scaledSensor << endl;
-    f << "Resolution: " << scc.resolution << endl;
-    f << "Lower_depth: " << scc.lowerRange << endl;
-    f << "Higher_depth: " << scc.higerRange << endl;
+    f << "Reference_sensor " << scc.referenceSensor << endl;
+    f << "Scaled_sensor " << scc.scaledSensor << endl;
+    f << "Resolution " << v_scaleCalibrations[0].resolution << endl;
+    f << "Lower_depth " << v_scaleCalibrations[0].lowerRange << endl;
+    f << "Higher_depth " << v_scaleCalibrations[0].higerRange << endl;
 
-    CVectorFloat xs,ys;
-    linspace(scc.lowerRange,scc.higerRange,
-             1+1/scc.resolution*(scc.higerRange-scc.lowerRange),
-             xs);
-
-    mrpt::math::leastSquareLinearFit(xs,ys,v_meanDepths,v_depthScales);
-
-    for ( int i = 0; i < ys.rows(); i++ )
+    for ( int i = 0; i < v_scaleCalibrations[0].scaleMultipliers.size(); i++ )
     {
-        //cout << "Depth: " << xs(i) << " scale:" << ys(i) << endl;
-        f << ys(i) << " ";
+        f << v_scaleCalibrations[0].scaleMultipliers[i]/v_scaleCalibrations[1].scaleMultipliers[i] << " ";
     }
 
     cout << "  [INFO] Done! " << endl << endl;
 }
-
 
 //-----------------------------------------------------------
 //
@@ -776,9 +1004,9 @@ int main(int argc, char* argv[])
         win3D.unlockAccess3DScene();*/
 
         cout << endl << "-----------------------------------------------------" << endl;
-        cout << "                Process rawlog" << endl;
-        cout << "           [Object Labeling Tookit]" << endl;
-        cout << "-----------------------------------------------------" << endl << endl;
+        cout <<         "              Process rawlog app.                    " << endl;
+        cout <<         "           [Object Labeling Tookit]                  " << endl;
+        cout <<         "-----------------------------------------------------" << endl << endl;
 
 
         //
@@ -836,8 +1064,11 @@ int main(int argc, char* argv[])
         if ( setCalibrationParameters )
             processRawlog();
 
-        else if ( computeScaleBetweenRGBDSensors )
+        else if ( computeScaleBetweenRGBDSensors && !scaleCalibrationConfig.computeTransitiveScale )
             computeScale();
+
+        else if ( computeScaleBetweenRGBDSensors && scaleCalibrationConfig.computeTransitiveScale )
+            computeTransitiveScale();
 
         return 0;
 
