@@ -165,5 +165,5 @@ TARGET_LINK_LIBRARIES(Create_video ${PCL_LIBRARIES} ${MRPT_LIBS} )
 ADD_EXECUTABLE(Dataset_statistics ${CMAKE_SOURCE_DIR}/src/dataset_statistics.cpp)
 TARGET_LINK_LIBRARIES(Dataset_statistics ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-#ADD_EXECUTABLE(Calibrate ${CMAKE_SOURCE_DIR}/src/calibrate.cpp)
-#TARGET_LINK_LIBRARIES(Calibrate ${PCL_LIBRARIES} ${MRPT_LIBS} )
+ADD_EXECUTABLE(Calibrate ${CMAKE_SOURCE_DIR}/src/calibrate.cpp)
+TARGET_LINK_LIBRARIES(Calibrate ${PCL_LIBRARIES} ${MRPT_LIBS} )

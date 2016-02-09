@@ -64,46 +64,28 @@ using namespace std;
 // Useful variables
 //
 
+string i_rawlogFilename;
 string configFileName;
 bool setCalibrationParameters = true;
-bool computeScaleBetweenRGBDSensors = false;
+int decimate = 0;
 
 struct TCalibrationConfig{
 
     bool only2DLaser;
     bool onlyRGBD;
+
     bool useDefaultIntrinsics;
     bool applyCLAMS;
     bool scaleDepthInfo;
     int  equalizeRGBHistograms;
     double truncateDepthInfo;
-    string i_rawlogFilename;
 
     TCalibrationConfig() : only2DLaser(false),
         onlyRGBD(false), useDefaultIntrinsics(true), equalizeRGBHistograms(false),
-        truncateDepthInfo(0), i_rawlogFilename("")
+        truncateDepthInfo(0)
     {}
 
 } calibConfig;
-
-struct TScaleCalibrationConfig{
-
-    float resolution;
-    float lowerRange;
-    float higerRange;
-    string referenceSensor;
-    string scaledSensor;
-    string o_scaleCalibrationFile;
-    bool   generateInverseScale;
-    bool   computeTransitiveScale;
-    string referenceScaleCalibrationFile;
-    string scaledScaleCalibrationFile;
-    vector<string> v_referenceRawlogs;
-    vector<string> v_scaledRawlogs;
-
-    TScaleCalibrationConfig()
-    {}
-} scaleCalibrationConfig;
 
 struct TScaleCalibration{
 
@@ -196,14 +178,6 @@ void loadConfig()
     // Load execution mode
 
     setCalibrationParameters = config.read_bool("GENERAL","set_calibration_parameters",true,true);
-    computeScaleBetweenRGBDSensors  = config.read_bool("GENERAL","compute_scale_between_RGBD_sensors",false,false);
-
-    // Check the processing modes activated by the user
-    if (( setCalibrationParameters && computeScaleBetweenRGBDSensors ) // both
-       || ( !setCalibrationParameters && !computeScaleBetweenRGBDSensors ) ) // anyone
-        throw std::logic_error("You have to chose between"
-           "set_calibration_parameters or compute_sacale_between_RGBD_sensors");
-
 
     //
     // Load calibration parameters
@@ -215,7 +189,6 @@ void loadConfig()
         calibConfig.truncateDepthInfo     = config.read_double("CALIBRATION","truncate_depth_info",0,true);
         calibConfig.applyCLAMS            = config.read_bool("CALIBRATION","apply_CLAMS_Calibration_if_available",false,true);
         calibConfig.scaleDepthInfo        = config.read_bool("CALIBRATION","scale_depth_info",false,true);
-
 
         //
         // Load 2D laser scanners info
@@ -308,68 +281,6 @@ void loadConfig()
         cout << endl;
     }
 
-    //
-    // Load parameters for computing the scale between two RGBD sensors
-
-    else if ( computeScaleBetweenRGBDSensors )
-    {
-        TScaleCalibrationConfig &scc = scaleCalibrationConfig;
-
-        scc.resolution = config.read_double("SCALE_BETWEEN_RGBD_SENSORS","resolution",0,true);
-        scc.lowerRange = config.read_double("SCALE_BETWEEN_RGBD_SENSORS","lower_range",0,true);
-        scc.higerRange = config.read_double("SCALE_BETWEEN_RGBD_SENSORS","higher_range",0,true);
-        scc.referenceSensor = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","reference_sensor","",true);
-        scc.scaledSensor = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","scaled_sensor","",true);
-        scc.o_scaleCalibrationFile = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","scale_calibration_file","",true);
-        scc.generateInverseScale = config.read_bool("SCALE_BETWEEN_RGBD_SENSORS","generate_inverse_scale",false,true);
-        scc.computeTransitiveScale = config.read_bool("SCALE_BETWEEN_RGBD_SENSORS","compute_transitive_scale",false,true);
-
-        if ( scc.computeTransitiveScale )
-        {
-            scc.referenceScaleCalibrationFile = config.read_string("SCALE_BETWEEN_RGBD_SENSORS","reference_scale_calibration_file","",true);;
-            scc.scaledScaleCalibrationFile =  config.read_string("SCALE_BETWEEN_RGBD_SENSORS","scaled_scale_calibration_file","",true);;
-        }
-
-        if ( scc.generateInverseScale )
-        {
-            string aux = scc.referenceSensor;
-            scc.referenceSensor = scc.scaledSensor;
-            scc.scaledSensor = aux;
-        }
-
-        vector<string> keys;
-        config.getAllKeys("SCALE_BETWEEN_RGBD_SENSORS",keys);
-
-        int rawlogIndex = 1;
-        bool keepLoading = true;
-
-        while ( keepLoading )
-        {
-            string referenceRawlog = mrpt::format("reference_rawlog_%i",rawlogIndex);
-            string scaledRawlog = mrpt::format("scaled_rawlog_%i",rawlogIndex);
-
-            if ( (std::find(keys.begin(), keys.end(), referenceRawlog) != keys.end())
-                 && (std::find(keys.begin(), keys.end(), scaledRawlog) != keys.end() ) )
-            {
-                scc.v_referenceRawlogs.push_back(
-                            config.read_string("SCALE_BETWEEN_RGBD_SENSORS",referenceRawlog,"",true) );
-                scc.v_scaledRawlogs.push_back(
-                            config.read_string("SCALE_BETWEEN_RGBD_SENSORS",scaledRawlog,"",true) );
-
-                rawlogIndex++;
-            }
-            else
-                keepLoading = false;
-         }
-
-        if ( scc.generateInverseScale )
-        {
-            vector<string> aux = scc.v_referenceRawlogs;
-            scc.v_referenceRawlogs = scc.v_scaledRawlogs;
-            scc.v_scaledRawlogs = aux;
-        }
-    }
-
 }
 
 
@@ -458,14 +369,138 @@ void equalizeCLAHE( CObservation3DRangeScanPtr obs3D )
 
 void showUsageInformation()
 {
-    cout << "Usage information. At least two expected arguments: " << endl <<
-            " \t (1) Rawlog file." << endl <<
-            " \t (2) Configuration file." << endl <<
+    cout << "Usage information. At least one expected argument: " << endl <<
+            " \t (1) Rawlog file." << endl <<            
             cout << "Then, optional parameters:" << endl <<
+            " \t -config        : Configuration file." << endl <<
             " \t -h             : Shows this help." << endl <<
-            " \t -only_hokuyo : Process only hokuyo observations." << endl;
+            " \t -only_hokuyo   : Process only hokuyo observations." <<
+            " \t -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl;
 }
 
+void decimateRawlog()
+{
+    //
+    // Check input rawlog
+    //
+
+    if (!mrpt::system::fileExists(i_rawlogFilename))
+    {
+        cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
+        cerr << " doesn't exist." << endl;
+        return;
+    }
+
+    CFileGZInputStream i_rawlog(i_rawlogFilename);
+
+    cout << "  [INFO] Decimating rawlog " << i_rawlogFilename << endl;
+    cout << "  [INFO] Taking one of each " << decimate << " obs" << endl;
+
+
+    string o_rawlogFileName;
+
+    //
+    // Set output rawlog file
+    //
+
+    o_rawlogFileName.assign(i_rawlogFilename.begin(),
+                            i_rawlogFilename.end()-7);
+    o_rawlogFileName += (calibConfig.only2DLaser) ? "_hokuyo" : "";
+    o_rawlogFileName += (calibConfig.onlyRGBD) ? "_rgbd" : "";
+    o_rawlogFileName += "_decimated.rawlog";
+
+    CFileGZOutputStream o_rawlog(o_rawlogFileName);
+
+    //
+    // Process rawlog
+    //
+
+    size_t N_sensors = v_RGBD_sensors.size();
+    vector<CObservation3DRangeScanPtr> v_obs(N_sensors); // Current set of obs
+    vector<bool> v_obs_loaded(N_sensors,false); // Track the sensors with an obs loaded
+    size_t setOfObsIndex = 0;
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+
+    cout << "    Process: ";
+    cout.flush();
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+    {
+        // Show progress as dots
+
+        if ( !(obsIndex % 200) )
+        {
+            if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
+            cout.flush();
+        }
+
+        if ( obs->sensorLabel == "HOKUYO1" )
+        {
+//            CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
+//            obs2D->load();
+
+//            obs2D->setSensorPose(v_laser_sensorPoses[0]);
+
+//            o_rawlog << obs2D;
+        }
+        else if ( !calibConfig.only2DLaser )
+        {
+            // RGBD observation?
+
+            size_t RGBD_sensorIndex = getSensorPos(obs->sensorLabel);
+
+            if ( RGBD_sensorIndex >= 0 )
+            {
+                TRGBD_Sensor &sensor = v_RGBD_sensors[RGBD_sensorIndex];
+                CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+                obs3D->load();
+
+                sensor.N_obsProcessed++;
+
+                v_obs[RGBD_sensorIndex]        = obs3D;
+                v_obs_loaded[RGBD_sensorIndex] = true;
+
+                double sum = 0;
+
+                for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                    sum += v_obs_loaded[i_sensor];
+
+                if ( sum == N_sensors )
+                {
+                    v_obs_loaded.clear();
+                    v_obs_loaded.resize(N_sensors,false);
+
+                    if (setOfObsIndex%decimate)
+                    {
+                        setOfObsIndex++;
+                        continue;
+                    }
+
+                    setOfObsIndex++;
+
+                    v_obs_loaded.clear();
+                    v_obs_loaded.resize(N_sensors,false);
+
+                    for ( size_t i=0; i < N_sensors; i++ )
+                        o_rawlog << v_obs[i];
+
+                }
+            }
+        }
+    }
+
+    cout << endl << "    Number of RGBD observations processed: " << endl;
+
+    for ( size_t i = 0; i < v_RGBD_sensors.size(); i++ )
+        cout << "      " << v_RGBD_sensors[i].sensorLabel
+             << ": " << v_RGBD_sensors[i].N_obsProcessed << endl;
+
+    cout << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl << endl;
+}
 
 //-----------------------------------------------------------
 //
@@ -479,16 +514,16 @@ void processRawlog()
     // Check input rawlog
     //
 
-    if (!mrpt::system::fileExists(calibConfig.i_rawlogFilename))
+    if (!mrpt::system::fileExists(i_rawlogFilename))
     {
-        cerr << "  [ERROR] A rawlog file with name " << calibConfig.i_rawlogFilename;
+        cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
         cerr << " doesn't exist." << endl;
         return;
     }
 
-    CFileGZInputStream i_rawlog(calibConfig.i_rawlogFilename);
+    CFileGZInputStream i_rawlog(i_rawlogFilename);
 
-    cout << "  [INFO] Working with " << calibConfig.i_rawlogFilename << endl;
+    cout << "  [INFO] Working with " << i_rawlogFilename << endl;
 
     cout << "  [INFO] Equalizing RGB histograms   : ";
 
@@ -526,16 +561,14 @@ void processRawlog()
     else
         cout << "off" << endl;
 
-    cout.flush();
-
     string o_rawlogFileName;
 
     //
     // Set output rawlog file
     //
 
-    o_rawlogFileName.assign(calibConfig.i_rawlogFilename.begin(),
-                            calibConfig.i_rawlogFilename.end()-7);
+    o_rawlogFileName.assign(i_rawlogFilename.begin(),
+                            i_rawlogFilename.end()-7);
     o_rawlogFileName += (calibConfig.only2DLaser) ? "_hokuyo" : "";
     o_rawlogFileName += (calibConfig.onlyRGBD) ? "_rgbd" : "";
     o_rawlogFileName += "_processed.rawlog";
@@ -560,6 +593,7 @@ void processRawlog()
     size_t obsIndex = 0;
 
     cout << "    Process: ";
+    cout.flush();
 
     while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
     {
@@ -631,6 +665,14 @@ void processRawlog()
                     // Undistort Depth image
                     Eigen::MatrixXf depthMatrix = obs3D->rangeImage;
                     v_RGBD_sensors[RGBD_sensorIndex].depth_intrinsic_model.undistort(&depthMatrix);
+//                    cout << "-----------------------------------------------" << endl;
+//                    cout << "ROws: " << depthMatrix.rows() << " cols: " << depthMatrix.cols() << endl;
+//                    cout << "-----------------------------------------------" << endl;
+//                    cout << "ROws: " << obs3D->rangeImage.rows() << " cols: " << obs3D->rangeImage.cols() << endl;
+//                    cout << obs3D->rangeImage << endl;
+
+//                    system::pause();
+
                     obs3D->rangeImage = depthMatrix;
                 }
 #endif
@@ -728,253 +770,59 @@ void processRawlog()
 
 //-----------------------------------------------------------
 //
-//                computeMeanDepthFromRawlog
+//                     loadParameters
 //
 //-----------------------------------------------------------
 
-float computeMeanDepthFromRawlog(const string rawlogFile, const string sensorLabel)
+int loadParameters(int argc, char* argv[])
 {
-    TScaleCalibrationConfig scc = scaleCalibrationConfig;
-    vector<float> v_meanDepths;
+    i_rawlogFilename = argv[1];
 
-    CFileGZInputStream rawlogStream(rawlogFile);
-
-    CActionCollectionPtr action;
-    CSensoryFramePtr observations;
-    CObservationPtr obs;
-    size_t obsIndex = 0;
-
-    //
-    // Get mean depth value for each RGBD observation
-
-    while ( CRawlog::getActionObservationPairOrObservation(rawlogStream,action,observations,obs,obsIndex) )
+    if ( argc >= 3 )
     {
-        // Check if it is an observation
-        if ( !obs )
-
-            continue;
-        // RGBD observation? and from the sensor which data are we processing?
-
-        //if ( obs->sensorLabel == sensorLabel )
+        for ( size_t arg = 3; arg < argc; arg++ )
         {
-            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-            obs3D->load();
-
-            int N_elements = 0;
-            double sum = 0.0;
-
-            for ( size_t row = 0; row < obs3D->rangeImage.rows(); row++ )
-                for ( size_t col = 0; col < obs3D->rangeImage.cols(); col++ )
-                {
-                    float value = obs3D->rangeImage(row,col);
-                    if ( value )
-                    {
-                        sum += value;
-                        N_elements++;
-                    }
-                }
-
-            float meanDistance = sum / (float)N_elements;
-            v_meanDepths.push_back(meanDistance);
+            if ( !strcmp(argv[arg],"-decimate") )
+            {
+                decimate = atoi(argv[arg+1]);
+                arg++;
+            }
+            if ( !strcmp(argv[arg],"-config") )
+            {
+                configFileName = argv[arg+1];
+                arg++;
+            }
+            if ( !strcmp(argv[arg],"-only_2DLaser") )
+            {
+                calibConfig.only2DLaser = true;
+                cout << "  [INFO] Processing only hokuyo observations."  << endl;
+            }
+            else if ( !strcmp(argv[arg],"-only_rgbd") )
+            {
+                calibConfig.onlyRGBD = true;
+                cout << "  [INFO] Processing only rgbd observations."  << endl;
+            }
+            else if ( !strcmp(argv[arg],"-h") )
+            {
+                showUsageInformation();
+                return 0;
+            }
+            else
+            {
+                cout << "  [ERROR] Unknown option " << argv[arg] << endl;
+                showUsageInformation();
+                return -1;
+            }
         }
     }
-
-    // Compute mean of the mean distances :)
-
-    float sum = std::accumulate(v_meanDepths.begin(), v_meanDepths.end(), 0.0);
-    float mean = sum / (float)v_meanDepths.size();
-
-    return mean;
-
-}
-
-//-----------------------------------------------------------
-//
-//               saveScaleCalibrationToFile
-//
-//-----------------------------------------------------------
-
-void saveScaleCalibrationToFile(CVectorFloat &v_meanDepths,
-                                CVectorFloat &v_depthScales)
-{
-    TScaleCalibrationConfig &scc = scaleCalibrationConfig;
-
-    ofstream f( scc.o_scaleCalibrationFile.c_str() );
-
-    if ( !f.is_open() )
-        cout << "    [ERROR] Opening file " << scc.o_scaleCalibrationFile << endl;
-
-    cout << "  [INFO] Saving depth scale calibration results to "
-         << scc.o_scaleCalibrationFile << endl;
-
-    f << "Reference_sensor " << scc.referenceSensor << endl;
-    f << "Scaled_sensor " << scc.scaledSensor << endl;
-    f << "Resolution " << scc.resolution << endl;
-    f << "Lower_depth " << scc.lowerRange << endl;
-    f << "Higher_depth " << scc.higerRange << endl;
-
-    CVectorFloat xs,ys;
-    linspace(scc.lowerRange,scc.higerRange,
-             1+1/scc.resolution*(scc.higerRange-scc.lowerRange),
-             xs);
-
-    mrpt::math::leastSquareLinearFit(xs,ys,v_meanDepths,v_depthScales);
-
-    for ( int i = 0; i < ys.rows(); i++ )
+    else
     {
-        //cout << "Depth: " << xs(i) << " scale:" << ys(i) << endl;
-        f << ys(i) << " ";
+        showUsageInformation();
+
+        return 0;
     }
 
-    cout << "  [INFO] Done! " << endl << endl;
-}
-
-
-//-----------------------------------------------------------
-//
-//                       computeScale
-//
-//-----------------------------------------------------------
-
-void computeScale()
-{
-
-    //
-    // Show configuration parameters
-
-    TScaleCalibrationConfig &scc = scaleCalibrationConfig;
-    size_t N_rawlogs = scc.v_referenceRawlogs.size();
-    const size_t N_sensors = 2;
-
-    cout << "  [INFO] Computing depth scale between RGBD sensors with the "
-            "following configuration:" << endl;
-
-    cout << "    Reference sensor: " << scc.referenceSensor << endl;
-    cout << "    Scaled sensor   : " << scc.scaledSensor << endl;
-    cout << "    Resolution      : " << scc.resolution << endl;
-    cout << "    Lower range     : " << scc.lowerRange << endl;
-    cout << "    Higer range     : " << scc.higerRange << endl;
-    cout << "    Sacale calib. file: " << scc.o_scaleCalibrationFile << endl;
-    cout << "    # of sensors    : " << N_sensors << endl;
-    cout << "    # of rawlogs    : " << N_rawlogs << endl;
-
-    for ( size_t i_rawlog = 0; i_rawlog < N_rawlogs; i_rawlog++ )
-    {
-        if (!mrpt::system::fileExists(scc.v_referenceRawlogs[i_rawlog]))
-        {
-            cerr << "    [ERROR] Rawlog file " << scc.v_referenceRawlogs[i_rawlog]
-                 << " doesn't exist." << endl;
-            return;
-        }
-
-        if (!mrpt::system::fileExists(scc.v_scaledRawlogs[i_rawlog]))
-        {
-            cerr << "    [ERROR] Rawlog file " << scc.v_scaledRawlogs[i_rawlog]
-                 << " doesn't exist." << endl;
-            return;
-        }
-
-        cout << "      Rawlog of reference sensor " << i_rawlog <<" name : " <<
-                scc.v_referenceRawlogs[i_rawlog] << endl;
-        cout << "      Rawlog of scaled sensor " << i_rawlog <<" name    : " <<
-                scc.v_scaledRawlogs[i_rawlog] << endl;
-    }
-
-    cout << "  [INFO] Calibrating scales " << endl;
-
-    //
-    // Data to be filled
-
-    CVectorFloat v_depthScales(N_rawlogs);
-    CVectorFloat v_meanDepths(N_rawlogs);
-
-    //
-    // Process rawlogs preparing data to calibrate the scale
-
-    for ( size_t i_rawlog = 0; i_rawlog < N_rawlogs; i_rawlog++ )
-    {
-
-        double refSensorMeanDepth = computeMeanDepthFromRawlog(scc.v_referenceRawlogs[i_rawlog],
-                                                               scc.referenceSensor );
-        double scaledSensorMeanDepth = computeMeanDepthFromRawlog(scc.v_scaledRawlogs[i_rawlog],
-                                                               scc.scaledSensor );
-        v_meanDepths(i_rawlog) = scaledSensorMeanDepth;
-        v_depthScales(i_rawlog) = refSensorMeanDepth/scaledSensorMeanDepth;
-
-        cout << "    refSensorMeanDepth: " << refSensorMeanDepth <<
-                " scaledSensorMeanDepth: " << scaledSensorMeanDepth <<
-                " scale: " << v_depthScales[i_rawlog] << endl;
-    }
-
-    //
-    // Save depth scale calibration to file
-
-    saveScaleCalibrationToFile(v_meanDepths,v_depthScales);
-}
-
-
-//-----------------------------------------------------------
-//
-//                          main
-//
-//-----------------------------------------------------------
-
-void computeTransitiveScale()
-{
-
-    //
-    // Show configuration parameters
-
-    TScaleCalibrationConfig &scc = scaleCalibrationConfig;
-
-    cout << "  [INFO] Computing transitive depth scale between RGBD sensors with the "
-            "following configuration:" << endl;
-
-    cout << "    Reference scale calibration file: " << scc.referenceScaleCalibrationFile << endl;
-    cout << "    Scaled scale calibration file   : " << scc.scaledScaleCalibrationFile << endl;
-    cout << "    Reference sensor                : " << scc.referenceSensor << endl;
-    cout << "    Scaled sensor                   : " << scc.scaledSensor << endl;
-
-    loadScaleCalibrationFromFile( scc.referenceScaleCalibrationFile );
-    loadScaleCalibrationFromFile( scc.scaledScaleCalibrationFile );
-
-    if ( v_scaleCalibrations[0].referenceSensor != scc.referenceSensor )
-        cout << "[WARNING!] Reference sensor in " << scc.referenceScaleCalibrationFile
-             << " doesn't match reference sensor label set in the configuration file" << endl;
-
-    if ( v_scaleCalibrations[1].referenceSensor != scc.scaledSensor )
-        cout << "[WARNING!] Reference sensor in " << scc.referenceScaleCalibrationFile
-             << " doesn't match scaled sensor label set in the configuration file" << endl;
-
-    if ( v_scaleCalibrations[0].resolution != v_scaleCalibrations[1].resolution )
-        throw logic_error("Scale calibration files have a different resolution.");
-
-    if ( v_scaleCalibrations[0].lowerRange != v_scaleCalibrations[1].lowerRange )
-        throw logic_error("Scale calibration files have a different lowerRange.");
-
-    if ( v_scaleCalibrations[0].higerRange != v_scaleCalibrations[1].higerRange )
-        throw logic_error("Scale calibration files have a different higerRange.");
-
-    ofstream f( scc.o_scaleCalibrationFile.c_str() );
-
-    if ( !f.is_open() )
-        cout << "    [ERROR] Opening file " << scc.o_scaleCalibrationFile << endl;
-
-    cout << "  [INFO] Saving depth scale calibration results to "
-         << scc.o_scaleCalibrationFile << endl;
-
-    f << "Reference_sensor " << scc.referenceSensor << endl;
-    f << "Scaled_sensor " << scc.scaledSensor << endl;
-    f << "Resolution " << v_scaleCalibrations[0].resolution << endl;
-    f << "Lower_depth " << v_scaleCalibrations[0].lowerRange << endl;
-    f << "Higher_depth " << v_scaleCalibrations[0].higerRange << endl;
-
-    for ( int i = 0; i < v_scaleCalibrations[0].scaleMultipliers.size(); i++ )
-    {
-        f << v_scaleCalibrations[0].scaleMultipliers[i]/v_scaleCalibrations[1].scaleMultipliers[i] << " ";
-    }
-
-    cout << "  [INFO] Done! " << endl << endl;
+    return 1;
 }
 
 //-----------------------------------------------------------
@@ -1018,47 +866,13 @@ int main(int argc, char* argv[])
 
         //
         // Load paramteres
-        //
 
-        calibConfig.i_rawlogFilename = argv[1];
-        configFileName = argv[2];
+        int res = loadParameters(argc,argv);
 
-        if ( argc >= 3 )
-        {
-
-
-            for ( size_t arg = 3; arg < argc; arg++ )
-            {
-                if ( !strcmp(argv[arg],"-only_2DLaser") )
-                {
-                    calibConfig.only2DLaser = true;
-                    cout << "  [INFO] Processing only hokuyo observations."  << endl;
-                }
-                else if ( !strcmp(argv[arg],"-only_rgbd") )
-                {
-                    calibConfig.onlyRGBD = true;
-                    cout << "  [INFO] Processing only rgbd observations."  << endl;
-                }
-                else if ( !strcmp(argv[arg],"-h") )
-                {
-                    showUsageInformation();
-                    return 0;
-                }
-                else
-                {
-                    cout << "  [ERROR] Unknown option " << argv[arg] << endl;
-                    showUsageInformation();
-                    return -1;
-                }
-            }
-
-        }
-        else
-        {
-            showUsageInformation();
-
+        if (res<0)
+            return -1;
+        else if (!res)
             return 0;
-        }
 
         //
         // Load config information
@@ -1068,14 +882,11 @@ int main(int argc, char* argv[])
         //
         // What to do?
 
-        if ( setCalibrationParameters )
+        if ( decimate )
+            decimateRawlog();
+
+        else if ( setCalibrationParameters )
             processRawlog();
-
-        else if ( computeScaleBetweenRGBDSensors && !scaleCalibrationConfig.computeTransitiveScale )
-            computeScale();
-
-        else if ( computeScaleBetweenRGBDSensors && scaleCalibrationConfig.computeTransitiveScale )
-            computeTransitiveScale();
 
         return 0;
 
