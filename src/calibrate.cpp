@@ -1,19 +1,9 @@
-#define NUM_ASUS_SENSORS 4
-
-#include <mrpt/poses/CPose3D.h>
-#include <mrpt/utils.h>
-#include <mrpt/system/os.h>
-#include <iostream>
-
-using namespace std;
-using namespace mrpt::utils;
-
 /*---------------------------------------------------------------------------*
  |                         Object Labeling Toolkit                           |
  |            A set of software components for the management and            |
  |                      labeling of RGB-D datasets                           |
  |                                                                           |
- |              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  |
+ |            Copyright (C) 2015-2016 Jose Raul Ruiz Sarmiento               |
  |                 University of Malaga <jotaraul@uma.es>                    |
  |             MAPIR Group: <http://http://mapir.isa.uma.es/>                |
  |                                                                           |
@@ -45,6 +35,9 @@ using namespace mrpt::utils;
 #include <mrpt/utils/CFileGZOutputStream.h>
 #include <mrpt/system/filesystem.h>
 #include <mrpt/math/interp_fit.h>
+#include <mrpt/poses/CPose3D.h>
+#include <mrpt/utils.h>
+#include <mrpt/system/os.h>
 
 #include "opencv2/imgproc/imgproc.hpp"
 
@@ -55,6 +48,8 @@ using namespace mrpt::utils;
 #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
     #include <clams/discrete_depth_distortion_model.h>
 #endif
+
+#define NUM_ASUS_SENSORS 4
 
 using namespace mrpt;
 using namespace mrpt::utils;
@@ -262,12 +257,11 @@ int getSensorPosInScalecalib( const string label)
 
 void showUsageInformation()
 {
-    cout << "Usage information. At least two expected arguments: " << endl <<
-            " \t (1) Rawlog file." << endl <<
-            " \t (2) Configuration file." << endl <<
-            cout << "Then, optional parameters:" << endl <<
-            " \t -h             : Shows this help." << endl <<
-            " \t -only_hokuyo : Process only hokuyo observations." << endl;
+    cout << "Usage information. At least one expected arguments: " << endl <<
+            " \t (1) Configuration file." << endl;
+   cout << "Then, optional parameters:" << endl <<
+            " \t -h             : Shows this help." << endl;
+
 }
 
 
@@ -560,17 +554,14 @@ int main(int argc, char* argv[])
         cout <<         "           [Object Labeling Tookit]                  " << endl;
         cout <<         "-----------------------------------------------------" << endl << endl;
 
-
         //
         // Load paramteres
         //
 
         configFileName = argv[1];
 
-        if ( argc >= 3 )
+        if ( argc >= 2 )
         {
-
-
             for ( size_t arg = 3; arg < argc; arg++ )
             {
                 if ( !strcmp(argv[arg],"-h") )

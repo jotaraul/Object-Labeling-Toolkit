@@ -3,7 +3,7 @@
  |            A set of software components for the management and            |
  |                      labeling of RGB-D datasets                           |
  |                                                                           |
- |              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  |
+ |            Copyright (C) 2015-2016 Jose Raul Ruiz Sarmiento               |
  |                 University of Malaga <jotaraul@uma.es>                    |
  |             MAPIR Group: <http://http://mapir.isa.uma.es/>                |
  |                                                                           |
@@ -68,6 +68,11 @@ string i_rawlogFilename;
 string configFileName;
 bool setCalibrationParameters = true;
 int decimate = 0;
+bool keepOnlyProcessed = false;
+float removeEmptyObs = 0.0;
+
+string replaceSensorLabel;  // Current sensor label
+string replaceSensorLabelAs;// New sensor label
 
 struct TCalibrationConfig{
 
@@ -249,7 +254,7 @@ void loadConfig()
 
                 string depthScaleModelPath = config.read_string(sensorLabel,"depth_scale_model_path","",false);
 
-                if ( !depthScaleModelPath.empty() )
+                if ( !depthScaleModelPath.empty() && calibConfig.scaleDepthInfo )
                     loadScaleCalibrationFromFile(depthScaleModelPath);
 
                 bool loadIntrinsic = config.read_bool(sensorLabel,"loadIntrinsic",0,true);
@@ -370,11 +375,14 @@ void equalizeCLAHE( CObservation3DRangeScanPtr obs3D )
 void showUsageInformation()
 {
     cout << "Usage information. At least one expected argument: " << endl <<
-            " \t (1) Rawlog file." << endl <<            
-            cout << "Then, optional parameters:" << endl <<
+            " \t (1) Rawlog file." << endl;
+    cout << "Then, optional parameters:" << endl <<
             " \t -config        : Configuration file." << endl <<
             " \t -h             : Shows this help." << endl <<
-            " \t -only_hokuyo   : Process only hokuyo observations." <<
+            " \t -only_hokuyo   : Process only hokuyo observations." << endl <<
+            " \t -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
+            " \t -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
+            " \t -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
             " \t -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl;
 }
 
@@ -388,6 +396,11 @@ void decimateRawlog()
     {
         cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
         cerr << " doesn't exist." << endl;
+        return;
+    }
+    else if (configFileName.empty())
+    {
+        cerr << "  [ERROR] Information needs to be loaded from a configuration file." << endl;
         return;
     }
 
@@ -413,7 +426,6 @@ void decimateRawlog()
 
     //
     // Process rawlog
-    //
 
     size_t N_sensors = v_RGBD_sensors.size();
     vector<CObservation3DRangeScanPtr> v_obs(N_sensors); // Current set of obs
@@ -767,6 +779,81 @@ void processRawlog()
 
 }
 
+void replaceLabel()
+{
+    //
+    // Check input rawlog
+    //
+
+    if (!mrpt::system::fileExists(i_rawlogFilename))
+    {
+        cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
+        cerr << " doesn't exist." << endl;
+        return;
+    }
+
+    CFileGZInputStream i_rawlog(i_rawlogFilename);
+
+    cout << "  [INFO] Processing rawlog " << i_rawlogFilename << endl;
+    cout << "  [INFO] Replacing sensor label " << replaceSensorLabel
+             << " by " << replaceSensorLabelAs << endl;
+
+
+    string o_rawlogFileName;
+
+    //
+    // Set output rawlog file
+    //
+
+    o_rawlogFileName.assign(i_rawlogFilename.begin(),
+                            i_rawlogFilename.end()-7);
+    o_rawlogFileName += (calibConfig.only2DLaser) ? "_hokuyo" : "";
+    o_rawlogFileName += (calibConfig.onlyRGBD) ? "_rgbd" : "";
+    o_rawlogFileName += "_processed.rawlog";
+
+    CFileGZOutputStream o_rawlog(o_rawlogFileName);
+
+    //
+    // Process rawlog
+    //
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+    size_t obsLabelsReplaced = 0;
+
+    cout << "    Process: ";
+    cout.flush();
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+    {
+        // Show progress as dots
+
+        if ( !(obsIndex % 200) )
+        {
+            if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
+            cout.flush();
+        }
+
+        if ( obs->sensorLabel == replaceSensorLabel )
+        {
+            obs->sensorLabel = replaceSensorLabelAs;
+
+            o_rawlog << obs;
+
+            obsLabelsReplaced++;
+        }
+        else if (!keepOnlyProcessed)
+            o_rawlog << obs;
+    }
+
+    cout << endl << "    Number of observation labels replaced: "
+         << obsLabelsReplaced << endl;
+
+    cout << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl << endl;
+}
+
 
 //-----------------------------------------------------------
 //
@@ -778,21 +865,39 @@ int loadParameters(int argc, char* argv[])
 {
     i_rawlogFilename = argv[1];
 
-    if ( argc >= 3 )
+    if ( argc >= 2 )
     {
-        for ( size_t arg = 3; arg < argc; arg++ )
+        for ( size_t arg = 2; arg < argc; arg++ )
         {
             if ( !strcmp(argv[arg],"-decimate") )
             {
                 decimate = atoi(argv[arg+1]);
                 arg++;
             }
-            if ( !strcmp(argv[arg],"-config") )
+            else if ( !strcmp(argv[arg],"-config") )
             {
                 configFileName = argv[arg+1];
                 arg++;
             }
-            if ( !strcmp(argv[arg],"-only_2DLaser") )
+            else if ( !strcmp(argv[arg],"-keepOnlyProcessed") )
+            {
+                keepOnlyProcessed = true;
+                cout << "  [INFO] Keeping only processed observations."  << endl;
+            }
+            else if ( !strcmp(argv[arg],"-removeEmptyObs") )
+            {
+                removeEmptyObs = atof(argv[arg+1]);;
+                cout << "  [INFO] Removing empty observations with a factor of null measuremets of "
+                     << removeEmptyObs << endl;
+                arg++;
+            }
+            else if ( !strcmp(argv[arg],"-replaceLabel") )
+            {
+                replaceSensorLabel = argv[arg+1];
+                replaceSensorLabelAs = argv[arg+2];
+                arg+=2;
+            }
+            else if ( !strcmp(argv[arg],"-only_2DLaser") )
             {
                 calibConfig.only2DLaser = true;
                 cout << "  [INFO] Processing only hokuyo observations."  << endl;
@@ -824,6 +929,102 @@ int loadParameters(int argc, char* argv[])
 
     return 1;
 }
+
+
+//-----------------------------------------------------------
+//
+//                   removeEmptyObservations
+//
+//-----------------------------------------------------------
+
+void removeEmptyObservations()
+{
+    //
+    // Check input rawlog
+    //
+
+    if (!mrpt::system::fileExists(i_rawlogFilename))
+    {
+        cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
+        cerr << " doesn't exist." << endl;
+        return;
+    }
+
+    CFileGZInputStream i_rawlog(i_rawlogFilename);
+
+    cout << "  [INFO] Processing rawlog " << i_rawlogFilename << endl;
+    cout << "  [INFO] Removing 3D observations with a factor of invalid measurements higher than "
+         << removeEmptyObs << endl;
+
+    string o_rawlogFileName;
+
+    //
+    // Set output rawlog file
+    //
+
+    o_rawlogFileName.assign(i_rawlogFilename.begin(),
+                            i_rawlogFilename.end()-7);
+    o_rawlogFileName += (calibConfig.only2DLaser) ? "_hokuyo" : "";
+    o_rawlogFileName += (calibConfig.onlyRGBD) ? "_rgbd" : "";
+    o_rawlogFileName += "_processed.rawlog";
+
+    CFileGZOutputStream o_rawlog(o_rawlogFileName);
+
+    //
+    // Process rawlog
+    //
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+    size_t obsRemoved = 0;
+
+    cout << "    Process: ";
+    cout.flush();
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+    {
+        // Show progress as dots
+
+        if ( !(obsIndex % 200) )
+        {
+            if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
+            cout.flush();
+        }
+
+        if (IS_CLASS(obs, CObservation3DRangeScan))
+        {
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            int rows = obs3D->rangeImage.rows();
+            int cols = obs3D->rangeImage.cols();
+
+            int invalidMeasurements = 0;
+
+            for ( int r = 0; r < rows; r++ )
+                for ( int c = 0; c < cols; c++ )
+                    if ( !obs3D->rangeImage(r,c) )
+                        invalidMeasurements++;
+
+            float factor = invalidMeasurements / (float)(rows*cols);
+
+            if ( factor < removeEmptyObs )
+                o_rawlog << obs3D;
+            else
+                obsRemoved++;
+        }
+
+
+    }
+
+    cout << endl << "    Number of observation removed: "
+         << obsRemoved << " of " << obsIndex << endl;
+
+    cout << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl << endl;
+}
+
 
 //-----------------------------------------------------------
 //
@@ -877,13 +1078,20 @@ int main(int argc, char* argv[])
         //
         // Load config information
 
-        loadConfig();
+        if ( !configFileName.empty() )
+            loadConfig();
 
         //
         // What to do?
 
         if ( decimate )
             decimateRawlog();
+
+        else if ( !replaceSensorLabel.empty() )
+            replaceLabel();
+
+        else if ( removeEmptyObs )
+            removeEmptyObservations();
 
         else if ( setCalibrationParameters )
             processRawlog();
