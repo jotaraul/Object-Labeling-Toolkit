@@ -2,11 +2,28 @@
 
 Toolkit for the labeling of objects within sequences of RGB-D observations.
 
-Copyright (C) 2015 Jose Raul Ruiz Sarmiento
+Copyright (C) 2015-2016 Jose Raul Ruiz Sarmiento
 
 University of Malaga (jotaraul@uma.es)
 
 http://mapir.isa.uma.es/jotaraul
+
+If you use this software, please read the LICENSE file. If the utilization is for academic purposes, please cite the work:
+
+>  @INPROCEEDINGS{Ruiz-Sarmiento-ECMR-2015,
+
+>     author = {Ruiz-Sarmiento, J. R. and Galindo, Cipriano and Gonz{\'{a}}lez-Jim{\'{e}}nez, Javier},
+
+>     title = {OLT: A Toolkit for Object Labeling Applied to Robotic RGB-D Datasets},
+
+>     booktitle = {European Conference on Mobile Robots},
+
+>     year = {2015},
+
+>     location = {Lincoln, UK}
+
+>  }
+
 
 Toolkit structure
 --------
