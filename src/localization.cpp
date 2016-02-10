@@ -96,7 +96,16 @@ using namespace pcl;
 // Configuration
 //
 
+string i_rawlogFileName;
+string o_rawlogFileName;
+
+CFileGZInputStream i_rawlog;
+CFileGZOutputStream o_rawlog;
+
+string simpleMapFile;
+
 bool initialGuessICP2D  = true;
+bool initialGuessDifodo = false;
 bool initialGuessGICP   = false;
 bool refineWithICP3D    = false;
 bool accumulatePast     = false;
@@ -197,77 +206,98 @@ void showUsageInformation()
 
 int loadParameters(int argc, char **argv)
 {
-    cout << "[INFO] Loading parameters from command line..." << endl;
 
-    for ( size_t arg = 3; arg < argc; arg++ )
+    if ( argc < 2 )
+    {
+        showUsageInformation();
+        return 0;
+    }
+
+    i_rawlogFileName = argv[1];
+
+    cout << "  [INFO] Loading parameters from command line..." << endl;
+
+    for ( size_t arg = 2; arg < argc; arg++ )
     {
         if ( !strcmp(argv[arg],"-disable_ICP2D") )
         {
             initialGuessICP2D = false;
-            cout << "[INFO] Disabled ICP2D to guess the robot localization."  << endl;
+            cout << "  [INFO] Disabled ICP2D to guess the robot localization."  << endl;
+        }
+        if ( !strcmp(argv[arg],"-enable_difodo") )
+        {
+            initialGuessDifodo = true;
+            initialGuessICP2D = false;
+            cout << "  [INFO] Enabled Difodo odometry to guess the robot localization."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-map") )
+        {
+            simpleMapFile = argv[arg+1];
+            cout << "  [INFO] Using geometric map file: " << simpleMapFile << endl;
+            arg++;
         }
         else if ( !strcmp(argv[arg], "-enable_initialGuessGICP") )
         {
             initialGuessGICP = true;
-            cout << "[INFO] Enabled GICP for the computation of the initial guess."  << endl;
+            cout << "  [INFO] Enabled GICP for the computation of the initial guess."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_ICP3D") )
         {
             refineWithICP3D = true;
             ICP3D_method    = "ICP";  // MRPT
-            cout << "[INFO] Enabled ICP3D."  << endl;
+            cout << "  [INFO] Enabled ICP3D."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_GICP3D") )
         {
             refineWithICP3D = true;
             ICP3D_method     = "GICP"; // PCL
-            cout << "[INFO] Enabled GICP3D."  << endl;
+            cout << "  [INFO] Enabled GICP3D."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_memory") )
         {
             accumulatePast   = true;
-            cout << "[INFO] Enabled (G)ICP3D memory."  << endl;
+            cout << "  [INFO] Enabled (G)ICP3D memory."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_keyPoses") )
         {
             useKeyPoses = true;
-            cout << "[INFO] Enabled key poses."  << endl;
+            cout << "  [INFO] Enabled key poses."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_overlapping") )
         {
             useOverlappingObs = true;
-            cout << "[INFO] Enabled overlapping obs."  << endl;
+            cout << "  [INFO] Enabled overlapping obs."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_smoothing") )
         {
             smooth3DObs  = true;
-            cout << "[INFO] Enabled smoothing."  << endl;
+            cout << "  [INFO] Enabled smoothing."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_manuallyFix") )
         {
             scoreThreshold = atof(argv[arg+1]);
-            arg += 1;
+            arg++;
 
             manuallyFix   = true;
-            cout << "[INFO] Enabled manually fixing of missaligned RGB-D obs. ";
-            cout << "Score threshold: " << scoreThreshold << endl;
+            cout << "  [INFO] Enabled manually fixing of missaligned RGB-D obs. ";
+            cout << "    Score threshold: " << scoreThreshold << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_processInBlock") )
         {
             processInBlock   = true;
-            cout << "[INFO] Enabled processInBlock."  << endl;
+            cout << "  [INFO] Enabled processInBlock."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_processBySensor") )
         {
             processBySensor   = true;
-            cout << "[INFO] Enabled processBySensor." << endl;
+            cout << "  [INFO] Enabled processBySensor." << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_RGBDdecimation") )
         {
             decimation = atoi(argv[arg+1]);
             arg += 1;
 
-            cout << "[INFO] Enabled RGBD decimation, using only 1 of each ";
+            cout << "  [INFO] Enabled RGBD decimation, using only 1 of each ";
             cout << decimation << " RGBD observations." << endl;
         }
         else if ( !strcmp(argv[arg], "-h") )
@@ -277,71 +307,101 @@ int loadParameters(int argc, char **argv)
         }
         else
         {
-            cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
+            cout << "  [Error] " << argv[arg] << " unknown paramter" << endl;
             showUsageInformation();
             return -1;
         }
 
     }
 
-    cout << "[INFO] Loading parameters from command line... DONE!" << endl;
+    cout << "  [INFO] Loading parameters from command line... DONE!" << endl;
+
+    o_rawlogFileName = i_rawlogFileName.substr(0,i_rawlogFileName.size()-7);
+
+    //
+    // Set the output rawlog name
+    //
+
+    if ( refineWithICP3D && ICP3D_method == "GICP" )
+        o_rawlogFileName += "_located-GICP";
+    else if ( refineWithICP3D && ICP3D_method == "ICP" )
+        o_rawlogFileName += "_located-ICP";
+    else
+        o_rawlogFileName += "_located";
+
+    if ( refineWithICP3D && accumulatePast )
+        o_rawlogFileName += "-memory";
+
+    if ( smooth3DObs )
+        o_rawlogFileName += "-smoothed";
+
+    o_rawlogFileName += ".rawlog";
 }
 
 
 //-----------------------------------------------------------
 //
-//                      smoothObs
+//                      smoothObss
 //
 //-----------------------------------------------------------
 
-void smoothObs( CObservation3DRangeScanPtr obsToSmooth )
+void smoothObss()
 {
-    CObservation3DRangeScanPtr obs3D = CObservation3DRangeScan::Create();
-    obs3D = obsToSmooth;
-    
-    // Remove the sensor pose
-    
-    obs3D.make_unique();
-    obs3D->sensorPose.setFromValues(0,0,0,0,0,0);
-    
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
-    obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
-    
-    pcl_cloud->height = 240;
-    pcl_cloud->width = 320;
-    
-    // Apply bilateral filter
-    
-    pcl::FastBilateralFilter<pcl::PointXYZ> m_bilateralFilter;
-    
-    m_bilateralFilter.setInputCloud (pcl_cloud);
-    
-    m_bilateralFilter.setSigmaS (10);
-    m_bilateralFilter.setSigmaR (0.05);
-    //m_bilateralFilter.setEarlyDivision (m_bilateralFilterConf.earlyDivision);
-    
-    m_bilateralFilter.filter (*pcl_cloud);
-    
-    // Fill the original obs
-    
-    obs3D->points3D_x.clear();
-    obs3D->points3D_y.clear();
-    obs3D->points3D_z.clear();
-    
-    size_t N_points = pcl_cloud->points.size();
-    obs3D->points3D_x.resize(N_points);
-    obs3D->points3D_y.resize(N_points);
-    obs3D->points3D_z.resize(N_points);
-    
-    for ( size_t point_index = 0;
-          point_index < N_points;
-          point_index++ )
+    cout << "  [INFO] Smoothing point clouds... ";
+
+    for ( size_t i = 0; i < v_3DRangeScans.size(); i++ )
     {
-        obsToSmooth->points3D_x[point_index] = pcl_cloud->points[point_index].x;
-        obsToSmooth->points3D_y[point_index] = pcl_cloud->points[point_index].y;
-        obsToSmooth->points3D_z[point_index] = pcl_cloud->points[point_index].z;
+
+        CObservation3DRangeScanPtr obs3D = CObservation3DRangeScan::Create();
+        obs3D = v_3DRangeScans[i].obs;
+
+        // Remove the sensor pose
+
+        obs3D.make_unique();
+        obs3D->sensorPose.setFromValues(0,0,0,0,0,0);
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+        obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
+
+        pcl_cloud->height = 240;
+        pcl_cloud->width = 320;
+
+        // Apply bilateral filter
+
+        pcl::FastBilateralFilter<pcl::PointXYZ> m_bilateralFilter;
+
+        m_bilateralFilter.setInputCloud (pcl_cloud);
+
+        m_bilateralFilter.setSigmaS (10);
+        m_bilateralFilter.setSigmaR (0.05);
+        //m_bilateralFilter.setEarlyDivision (m_bilateralFilterConf.earlyDivision);
+
+        m_bilateralFilter.filter (*pcl_cloud);
+
+        // Fill the original obs
+
+        obs3D->points3D_x.clear();
+        obs3D->points3D_y.clear();
+        obs3D->points3D_z.clear();
+
+        size_t N_points = pcl_cloud->points.size();
+        obs3D->points3D_x.resize(N_points);
+        obs3D->points3D_y.resize(N_points);
+        obs3D->points3D_z.resize(N_points);
+
+        for ( size_t point_index = 0;
+              point_index < N_points;
+              point_index++ )
+        {
+            v_3DRangeScans[i].obs->points3D_x[point_index] = pcl_cloud->points[point_index].x;
+            v_3DRangeScans[i].obs->points3D_y[point_index] = pcl_cloud->points[point_index].y;
+            v_3DRangeScans[i].obs->points3D_z[point_index] = pcl_cloud->points[point_index].z;
+        }
     }
+
+    cout << "done!" << endl;
 }
+
 
 //-----------------------------------------------------------
 //
@@ -385,6 +445,14 @@ void trajectoryICP2D( string &simpleMapFile,
                       CObservation2DRangeScanPtr obs2D,
                       double &goodness )
 {
+
+    //        CSimplePointsMap map1,map2;
+    //        map1.load2D_from_text_file("map1.txt");
+    //        map2.load2D_from_text_file("map2.txt");
+    //        CPose3D poseMap2(-5.657933, 1.118298, 0, 2.858798, 0, 0);
+    //        map1.insertAnotherMap(&map2,poseMap2);
+    //        map1.save2D_to_text_file("map3.txt");
+
     CSimplePointsMap		m1,m2;
     
     float					runningTime;
@@ -522,7 +590,7 @@ void trajectoryICP2D( string &simpleMapFile,
                     &runningTime,
                     (void*)&info);
         
-        printf("ICP run in %.02fms, %d iterations (%.02fms/iter), %.01f%% goodness\n -> ",
+        printf("    ICP run in %.02fms, %d iterations (%.02fms/iter), %.01f%% goodness\n    -> ",
                runningTime*1000,
                info.nIterations,
                runningTime*1000.0f/info.nIterations,
@@ -664,7 +732,7 @@ void manuallyFixAlign( vector<T3DRangeScan> &v_obs,
                        vector<T3DRangeScan> &v_obs2,
                        CPose3D &estimated_pose )
 {
-    cout << "[INFO] Manually fixing. Initial pose: " << estimated_pose << endl;
+    cout << "  [INFO] Manually fixing. Initial pose: " << estimated_pose << endl;
     
     TPose3D pose;
     
@@ -918,7 +986,7 @@ void manuallyFixAlign( vector<T3DRangeScan> &v_obs,
     
     estimated_pose = pose;
     
-    cout << "[INFO] Final pose: " << estimated_pose << endl;
+    cout << "  [INFO] Final pose: " << estimated_pose << endl;
 }
 
 //-----------------------------------------------------------
@@ -1431,7 +1499,6 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_o
     
 }
 
-
 //-----------------------------------------------------------
 //
 //                   getRGBDSensorIndex
@@ -1448,87 +1515,397 @@ size_t getRGBDSensorIndex( const string sensorLabel )
 
 //-----------------------------------------------------------
 //
+//                       refineICP3D
+//
+//-----------------------------------------------------------
+
+void refineICP3D()
+{
+
+    size_t N_sensors = RGBD_sensors.size();
+    size_t N_scans = v_3DRangeScans.size();
+
+    if ( processBySensor )
+    {
+        cout << "---------------------------------------------------" << endl;
+        cout << "      Getting relative position among devices " << ICP3D_method << endl;
+        cout << "---------------------------------------------------" << endl;
+
+        vector< vector <T3DRangeScan> > v_allObs(N_sensors);  // Past set of obs
+
+        for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
+        {
+            T3DRangeScan obs = v_3DRangeScans[obsIndex];
+            size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
+            v_allObs[sensorIndex].push_back(obs);
+        }
+
+        for ( size_t device_index = 1; device_index < N_sensors; device_index++ )
+        {
+            cout << "Relative transformation from device " << device_index;
+            cout << " to 0"<< endl;
+
+            refineLocationGICP3D( v_allObs[0], v_allObs[device_index] );
+            cout << " <-- this"<< endl;
+        }
+    }
+    else
+    {
+
+        cout << "---------------------------------------------------" << endl;
+        cout << "         Refining sensor poses using " << ICP3D_method << endl;
+        cout << "---------------------------------------------------" << endl;
+
+
+        vector<T3DRangeScan> v_obs;  // Past set of obs
+        vector<T3DRangeScan> v_obsC(N_sensors); // Current set of obs
+        vector<size_t> v_obsC_indices(N_sensors); // Indices in v_3DRangeScans vector of the current set of obs
+        vector<size_t> v_obsToDelete; // If using key poses, not key obs to delete
+        vector<bool> v_obs_loaded(N_sensors,false); // Track the sensors with an obs loaded
+
+        bool first = true;
+        size_t set_index = 0;
+
+        CTicTac clockEllapsedICP3D;
+        clockEllapsedICP3D.Tic();
+
+        for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
+        {
+            CTicTac clockLoop;
+            clockLoop.Tic();
+
+            T3DRangeScan obs = v_3DRangeScans[obsIndex];
+
+            size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
+
+            v_obsC[sensorIndex]       = obs;
+            v_obs_loaded[sensorIndex] = true;
+            v_obsC_indices[sensorIndex] = obsIndex;
+
+            //cout << "Sensor index " << sensorIndex;
+            //cout << " included " << obs.obs->sensorLabel << endl;
+
+            double sum = 0;
+
+            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                sum += v_obs_loaded[i_sensor];
+
+            if ( sum == N_sensors )
+            {
+                v_obs_loaded.clear();
+                v_obs_loaded.resize(N_sensors,false);
+
+                cout << "Working set of obs index... " << set_index++ << " of approx. " << (double)N_scans/N_sensors << endl;
+
+                if ( first )
+                {
+                    v_obs = v_obsC;
+                    first = false;
+
+                    if ( manuallyFix )
+                    {
+                        vector<T3DRangeScan> v_aligned;
+                        v_aligned.push_back(v_obs[0]);
+                        CObservation3DRangeScan obs3D;
+                        TTimeStamp t1 = v_obs[0].obs->timestamp;
+
+                        for ( size_t i_sensor = 1; i_sensor < N_sensors; i_sensor++ )
+                        {
+                            cout << "Time diff: " << timeDifference(t1,v_obs[i_sensor].obs->timestamp) << endl;
+                            CPose3D estimated_pose;
+                            //v_obs[i_sensor].obs->getSensorPose(estimated_pose);
+
+                            vector<T3DRangeScan> v_toAligne;
+                            v_toAligne.push_back(v_obs[i_sensor]);
+                            manuallyFixAlign( v_aligned, v_toAligne, estimated_pose );
+
+                            CPose3D pose;
+                            v_obs[i_sensor].obs->getSensorPose( pose );
+
+                            CPose3D finalPose = estimated_pose + pose;
+                            v_obs[i_sensor].obs->setSensorPose(finalPose);
+
+                            v_aligned.push_back( v_obs[i_sensor] );
+                        }
+                    }
+
+                    continue;
+                }
+
+                // Check if it's a key pose
+                if ( useKeyPoses )
+                {
+                    bool keyPose = true;
+
+                    vector<CPose3D> v_poses, v_posesC;
+
+                    size_t N_prevObs = v_obs.size();
+
+                    for ( int i_sensor = N_sensors-1; i_sensor >= 0; i_sensor-- )
+                        v_obs[N_prevObs-i_sensor].obs->getSensorPose(v_poses[i_sensor]);
+
+                    for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                        v_obsC[i_sensor].obs->getSensorPose(v_posesC[i_sensor]);
+
+                    for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                        keyPose = keyPose && isKeyPose(v_posesC[i_sensor],v_poses[i_sensor]);
+
+                    if (!keyPose)
+                    {
+                        cout << "Not a key pose, moving to the next one." << endl;
+                        cout << "---------------------------------------------------" << endl;
+
+                        for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                            v_obsToDelete.push_back(v_obsC_indices[i_sensor]);
+
+                        continue;
+                    }
+                }
+
+                // Build vectors with individual observations
+                vector< vector<T3DRangeScan> > v_isolatedObs(N_sensors);
+                for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                {
+                    v_isolatedObs[i_sensor]= vector<T3DRangeScan>(1,v_obsC[i_sensor]);
+                }
+
+                if ( ICP3D_method == "GICP" )
+                {
+                    if ( accumulatePast )
+                    {
+                        if ( processInBlock )
+                            refineLocationGICP3D( v_obs, v_obsC );
+                        else
+                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                                refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                    }
+                    else
+                        refineLocationGICP3D( v_obs, v_obsC );
+                }
+                else // ICP3D
+                {
+                    if ( accumulatePast )
+                    {
+                        if ( processInBlock )
+                            refineLocationICP3D( v_obs, v_obsC );
+                        else
+                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                                refineLocationICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                    }
+                    else
+                        refineLocationICP3D( v_obs, v_obsC );
+                }
+
+                if ( accumulatePast )
+                    v_obs.insert(v_obs.end(), v_obsC.begin(), v_obsC.end() );
+                else
+                    v_obs = v_obsC;
+
+                // Time Statistics
+
+                cout << "Time ellapsed      : " <<
+                        size_t(clockLoop.Tac()  / SECS_PER_MIN) << " min. " <<
+                        size_t(clockLoop.Tac()) % SECS_PER_MIN << " s." << endl;
+
+                cout << "Total time ellapsed: " <<
+                        size_t(clockEllapsedICP3D.Tac()  / SECS_PER_MIN) << " min. " <<
+                        size_t(clockEllapsedICP3D.Tac()) % SECS_PER_MIN  << " s." << endl;
+
+                cout << "---------------------------------------------------" << endl;
+            }
+        }
+    }
+}
+
+
+//-----------------------------------------------------------
+//
+//                   computeInitialGuessDifodo
+//
+//-----------------------------------------------------------
+
+void computeInitialGuessDifodo()
+{
+    cout << "  ---------------------------------------------------" << endl;
+    cout << "          Computing initial poses with Difodo" << endl;
+    cout << "  ---------------------------------------------------" << endl;
+}
+
+//-----------------------------------------------------------
+//
+//                   computeInitialGuessICP2D
+//
+//-----------------------------------------------------------
+
+void computeInitialGuessICP2D()
+{
+    cout << "  ---------------------------------------------------" << endl;
+    cout << "          Computing initial poses with ICP2D" << endl;
+    cout << "  ---------------------------------------------------" << endl;
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+    vector<int> RGBDobsPerSensor;
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,
+                                                           action,observations,obs,obsIndex) )
+    {
+        // 2D laser observation
+        if ( IS_CLASS(obs, CObservation2DRangeScan) )
+        {
+            CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
+            obs2D->load();
+            double goodness;
+
+            trajectoryICP2D(simpleMapFile,obs2D,goodness);
+
+            TRobotPose robotPose;
+            robotPose.pose = initialPose;
+            robotPose.time = obs2D->timestamp;
+            robotPose.goodness = goodness;
+
+            if ( ( !initialGuessGICP && ( goodness > 80 ) )
+                 || ( initialGuessGICP && goodness < 1 ) )
+                v_robotPoses.push_back( robotPose );
+            else
+                v_pending3DRangeScans.clear();
+
+            // Process pending 3D range scans, if any
+            if ( !v_pending3DRangeScans.empty() )
+                processPending3DRangeScans();
+        }
+        // 3D range scan observation
+        else if ( IS_CLASS(obs, CObservation3DRangeScan) )
+        {
+            string &label = obs->sensorLabel;
+
+            if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
+                 == RGBD_sensors.end() )
+            {
+                RGBD_sensors.push_back(label);
+                RGBDobsPerSensor.push_back(0);
+
+                //For synchornization with the other possible devices
+                for ( int i = 0; i < RGBDobsPerSensor.size()-1; i++ )
+                    RGBDobsPerSensor[i] = 0;
+            }
+
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            // Check decimation and insert the observation
+            if ( !(RGBDobsPerSensor[getRGBDSensorIndex(label)] % decimation) )
+                v_pending3DRangeScans.push_back( obs3D );
+
+            RGBDobsPerSensor[getRGBDSensorIndex(label)]++;
+        }
+        else
+            continue;
+    }
+
+    trajectoryFile.close();
+}
+
+
+//-----------------------------------------------------------
+//
+//                 computeInitialGuessOnlyFill
+//
+//-----------------------------------------------------------
+
+void computeInitialGuessOnlyFill()
+{
+    cout << "  ---------------------------------------------------" << endl;
+    cout << "               Filling initial poses" << endl;
+    cout << "  ---------------------------------------------------" << endl;
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+    vector<int> RGBDobsPerSensor;
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,
+                                                           action,observations,obs,obsIndex) )
+    {
+        if ( IS_CLASS(obs, CObservation3DRangeScan) )
+        {
+            string &label = obs->sensorLabel;
+
+            // New sensor?
+            if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
+                 == RGBD_sensors.end() )
+            {
+                RGBD_sensors.push_back(label);
+                RGBDobsPerSensor.push_back(0);
+
+                //For synchornization with the other possible devices
+                for ( int i = 0; i < RGBDobsPerSensor.size()-1; i++ )
+                    RGBDobsPerSensor[i] = 0;
+            }
+
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            T3DRangeScan obs;
+            obs.obs = obs3D;
+
+            // Check decimation and insert the observation
+            if ( !(RGBDobsPerSensor[getRGBDSensorIndex(label)] % decimation) )
+                v_3DRangeScans.push_back( obs );
+
+            RGBDobsPerSensor[getRGBDSensorIndex(label)]++;
+        }
+    }
+}
+
+
+//-----------------------------------------------------------
+//
 //                          main
 //
 //-----------------------------------------------------------
 
 int main(int argc, char **argv)
 {
+    cout << endl << "-----------------------------------------------------" << endl;
+    cout <<         "              Localize sensors app.                    " << endl;
+    cout <<         "            [Object Labeling Tookit]                 " << endl;
+    cout <<         "-----------------------------------------------------" << endl << endl;
+
     try
     {
-        string simpleMapFile;
         CTicTac clock;
-        double time_icp2D = 0, time_icp3D = 0, time_smoothing = 0, time_overlapping = 0;
-        
-        string i_rawlogFile;
-        string o_rawlogFile;
+        double time_icp2D = 0, time_difodo = 0, time_icp3D = 0,
+                time_smoothing = 0, time_overlapping = 0;
 
-//        CSimplePointsMap map1,map2;
-//        map1.load2D_from_text_file("map1.txt");
-//        map2.load2D_from_text_file("map2.txt");
-//        CPose3D poseMap2(-5.657933, 1.118298, 0, 2.858798, 0, 0);
-//        map1.insertAnotherMap(&map2,poseMap2);
-//        map1.save2D_to_text_file("map3.txt");
-        
         //
         // Load parameters
-        //
-        
-        if ( argc >= 3 )
-        {
-            i_rawlogFile = argv[1];
-            simpleMapFile = argv[2];
-            
-            o_rawlogFile = i_rawlogFile.substr(0,i_rawlogFile.size()-7);
-            
-            int res = loadParameters(argc,argv);
 
-            if ( res < 0 ) // error while loading parameteres
-                return -1;
-            else if ( !res ) // Just shown the help
-                return 0;
-        }
-        else
-        {
-            showUsageInformation();            
+        int res = loadParameters(argc,argv);
+
+        if ( res < 0 ) // error while loading parameteres
+            return -1;
+        else if ( !res ) // Just shown the help
             return 0;
-        }
 
-        mrpt::system::sleep(4000); // Just to see the parameters loaded
-        
-        //
-        // Set the output rawlog name
-        //
+        mrpt::system::sleep(4000); // Just to visualize the parameters loaded
 
-        if ( refineWithICP3D && ICP3D_method == "GICP" )
-            o_rawlogFile += "_located-GICP";
-        else if ( refineWithICP3D && ICP3D_method == "ICP" )
-            o_rawlogFile += "_located-ICP";
-        else
-            o_rawlogFile += "_located";
-        
-        if ( refineWithICP3D && accumulatePast )
-            o_rawlogFile += "-memory";
-                
-        if ( smooth3DObs )
-            o_rawlogFile += "-smoothed";
-        
-        o_rawlogFile += ".rawlog";
-
-        CFileGZOutputStream o_rawlog(o_rawlogFile);
-        
         //
         //  Check the input rawlog file
+        
+        if (!mrpt::system::fileExists(i_rawlogFileName))
+            cout << "  [ERROR] Couldn't open rawlog dataset file " <<
+                    i_rawlogFileName << endl;
+        
+        cout << "  [INFO] Working with " << i_rawlogFileName << endl;
+
+        i_rawlog.open(i_rawlogFileName);
+        o_rawlog.open(o_rawlogFileName);
+        
         //
-        
-        if (!mrpt::system::fileExists(i_rawlogFile))
-            throw std::runtime_error("Couldn't open rawlog dataset file for input...");
-        
-        cout << "[INFO] Working with " << i_rawlogFile << endl;
-
-        CFileGZInputStream i_rawlog(i_rawlogFile);
-
-        
         // Create the reference objects:
         
         if ( refineWithICP3D && ICP3D_method == "ICP" )
@@ -1537,149 +1914,53 @@ int main(int argc, char **argv)
             window2 = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: UNALIGNED scans",500,500));
             window3 = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: ICP-ALIGNED scans",500,500));
         }
-        
-        
-        //
-        // Compute initial guess from ICP2D
-        //
-        
-        cout << "---------------------------------------------------" << endl;
-        cout << "        Computing initial poses with ICP2D" << endl;
-        cout << "---------------------------------------------------" << endl;
 
-        CActionCollectionPtr action;
-        CSensoryFramePtr observations;
-        CObservationPtr obs;
-        size_t obsIndex = 0;
-        vector<int> RGBDobsPerSensor;
-        
+        //
+        // Compute initial guess
+
         if ( initialGuessICP2D )
         {
             clock.Tic();
-            
-            while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,
-                                            action,observations,obs,obsIndex) )
-            {
-                // 2D laser observation
-                if ( IS_CLASS(obs, CObservation2DRangeScan) )
-                {
-                    CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
-                    obs2D->load();
-                    double goodness;
-                    
-                    trajectoryICP2D(simpleMapFile,obs2D,goodness);
-                    
-                    TRobotPose robotPose;
-                    robotPose.pose = initialPose;
-                    robotPose.time = obs2D->timestamp;
-                    robotPose.goodness = goodness;
-                    
-                    if ( ( !initialGuessGICP && ( goodness > 80 ) )
-                         || ( initialGuessGICP && goodness < 1 ) )
-                        v_robotPoses.push_back( robotPose );
-                    else
-                        v_pending3DRangeScans.clear();
-                    
-                    // Process pending 3D range scans, if any
-                    if ( !v_pending3DRangeScans.empty() )
-                        processPending3DRangeScans();
-                }
-                // 3D range scan observation
-                else if ( IS_CLASS(obs, CObservation3DRangeScan) )
-                {
-                    string &label = obs->sensorLabel;
-                    
-                    if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
-                         == RGBD_sensors.end() )
-                    {
-                        RGBD_sensors.push_back(label);
-                        RGBDobsPerSensor.push_back(0);
 
-                        //For synchornization with the other possible devices
-                        for ( int i = 0; i < RGBDobsPerSensor.size()-1; i++ )
-                            RGBDobsPerSensor[i] = 0;
-                    }
-                    
-                    CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-                    obs3D->load();
-                    
-                    // Check decimation and insert the observation
-                    if ( !(RGBDobsPerSensor[getRGBDSensorIndex(label)] % decimation) )
-                        v_pending3DRangeScans.push_back( obs3D );
+            computeInitialGuessICP2D();
 
-                    RGBDobsPerSensor[getRGBDSensorIndex(label)]++;
-                }
-                else
-                    continue;
-            }
-            
             time_icp2D = clock.Tac();
-            
-            trajectoryFile.close();
+
+        }
+        else if ( initialGuessDifodo )
+        {
+            clock.Tic();
+
+            computeInitialGuessDifodo();
+
+            time_difodo = clock.Tac();
         }
         else // If not using ICP2D initial guess, just fill the vector of 3D obs
         {
-            while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,
-                                            action,observations,obs,obsIndex) )
-            {
-                if ( IS_CLASS(obs, CObservation3DRangeScan) )
-                {
-                    string &label = obs->sensorLabel;
-                    
-                    if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
-                         == RGBD_sensors.end() )
-                    {
-                        RGBD_sensors.push_back(label);
-                        RGBDobsPerSensor.push_back(0);
-
-                        //For synchornization with the other possible devices
-                        for ( int i = 0; i < RGBDobsPerSensor.size()-1; i++ )
-                            RGBDobsPerSensor[i] = 0;
-                    }
-                    
-                    CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-                    obs3D->load();
-                    
-                    T3DRangeScan obs;
-                    obs.obs = obs3D;
-                    
-                    // Check decimation and insert the observation
-                    if ( !(RGBDobsPerSensor[getRGBDSensorIndex(label)] % decimation) )
-                        v_3DRangeScans.push_back( obs );
-
-                    RGBDobsPerSensor[getRGBDSensorIndex(label)]++;
-                }
-            }
+            computeInitialGuessOnlyFill();
         }
 
-        cout << "[INFO] Number of RGBD observations to work with: ";
+        cout << "  [INFO] Number of RGBD observations to work with: ";
         cout << v_3DRangeScans.size() << endl;
         
         //
         // Smooth3DObs?
-        //
         
         if ( smooth3DObs )
         {
-            cout << "[INFO] Smoothing point clouds... ";
-            
             clock.Tic();
-            
-            for ( size_t i = 0; i < v_3DRangeScans.size(); i++ )
-                smoothObs( v_3DRangeScans[i].obs );
+
+            smoothObss(); // TODO: This colud be leveraged by DIFODO, refactor it for that
             
             time_smoothing = clock.Tac();
-            
-            cout << "done." << endl;
         }
         
         //
-        // Use overlapping
-        //
+        // Overlaping?
         
         if ( useOverlappingObs )
         {
-            cout << "[INFO] Computing convex hulls to check overlapping... ";
+            cout << "  [INFO] Computing convex hulls to check overlapping... ";
             
             clock.Tic();
             
@@ -1705,204 +1986,15 @@ int main(int argc, char **argv)
         // Refine using ICP3D
         //
         
-        size_t N_sensors = RGBD_sensors.size();
+
         
         if ( refineWithICP3D )
         {
             clock.Tic();
             
-            size_t N_scans = v_3DRangeScans.size();
-            
-            if ( processBySensor )
-            {
-                cout << "---------------------------------------------------" << endl;
-                cout << "      Getting relative position among devices " << ICP3D_method << endl;
-                cout << "---------------------------------------------------" << endl;
-                
-                vector< vector <T3DRangeScan> > v_allObs(N_sensors);  // Past set of obs
-                
-                for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
-                {
-                    T3DRangeScan obs = v_3DRangeScans[obsIndex];
-                    size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
-                    v_allObs[sensorIndex].push_back(obs);
-                }
-                
-                for ( size_t device_index = 1; device_index < N_sensors; device_index++ )
-                {
-                    cout << "Relative transformation from device " << device_index;
-                    cout << " to 0"<< endl;
-                    
-                    refineLocationGICP3D( v_allObs[0], v_allObs[device_index] );
-                    cout << " <-- this"<< endl;
-                }
-            }
-            else
-            {
-                
-                cout << "---------------------------------------------------" << endl;
-                cout << "         Refining sensor poses using " << ICP3D_method << endl;
-                cout << "---------------------------------------------------" << endl;
-                
-                
-                vector<T3DRangeScan> v_obs;  // Past set of obs
-                vector<T3DRangeScan> v_obsC(N_sensors); // Current set of obs
-                vector<size_t> v_obsC_indices(N_sensors); // Indices in v_3DRangeScans vector of the current set of obs
-                vector<size_t> v_obsToDelete; // If using key poses, not key obs to delete
-                vector<bool> v_obs_loaded(N_sensors,false); // Track the sensors with an obs loaded
-                
-                bool first = true;
-                size_t set_index = 0;
-                
-                CTicTac clockEllapsedICP3D;
-                clockEllapsedICP3D.Tic();
-                
-                for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
-                {
-                    CTicTac clockLoop;
-                    clockLoop.Tic();
-                    
-                    T3DRangeScan obs = v_3DRangeScans[obsIndex];
-                    
-                    size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
-                    
-                    v_obsC[sensorIndex]       = obs;
-                    v_obs_loaded[sensorIndex] = true;
-                    v_obsC_indices[sensorIndex] = obsIndex;
+            refineICP3D();
 
-                    //cout << "Sensor index " << sensorIndex;
-                    //cout << " included " << obs.obs->sensorLabel << endl;
-                    
-                    double sum = 0;
-                    
-                    for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                        sum += v_obs_loaded[i_sensor];
-                    
-                    if ( sum == N_sensors )
-                    {
-                        v_obs_loaded.clear();
-                        v_obs_loaded.resize(N_sensors,false);
-                        
-                        cout << "Working set of obs index... " << set_index++ << " of approx. " << (double)N_scans/N_sensors << endl;
-                        
-                        if ( first )
-                        {
-                            v_obs = v_obsC;
-                            first = false;
-
-                            if ( manuallyFix )
-                            {
-                                vector<T3DRangeScan> v_aligned;
-                                v_aligned.push_back(v_obs[0]);
-                                CObservation3DRangeScan obs3D;
-                                TTimeStamp t1 = v_obs[0].obs->timestamp;
-
-                                for ( size_t i_sensor = 1; i_sensor < N_sensors; i_sensor++ )
-                                {
-                                    cout << "Time diff: " << timeDifference(t1,v_obs[i_sensor].obs->timestamp) << endl;
-                                    CPose3D estimated_pose;
-                                    //v_obs[i_sensor].obs->getSensorPose(estimated_pose);
-
-                                    vector<T3DRangeScan> v_toAligne;
-                                    v_toAligne.push_back(v_obs[i_sensor]);
-                                    manuallyFixAlign( v_aligned, v_toAligne, estimated_pose );
-
-                                    CPose3D pose;
-                                    v_obs[i_sensor].obs->getSensorPose( pose );
-
-                                    CPose3D finalPose = estimated_pose + pose;
-                                    v_obs[i_sensor].obs->setSensorPose(finalPose);
-
-                                    v_aligned.push_back( v_obs[i_sensor] );
-                                }
-                            }
-
-                            continue;
-                        }
-
-                        // Check if it's a key pose
-                        if ( useKeyPoses )
-                        {
-                            bool keyPose = true;
-                            
-                            vector<CPose3D> v_poses, v_posesC;
-                            
-                            size_t N_prevObs = v_obs.size();
-                            
-                            for ( int i_sensor = N_sensors-1; i_sensor >= 0; i_sensor-- )
-                                v_obs[N_prevObs-i_sensor].obs->getSensorPose(v_poses[i_sensor]);
-                            
-                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                v_obsC[i_sensor].obs->getSensorPose(v_posesC[i_sensor]);
-                            
-                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                keyPose = keyPose && isKeyPose(v_posesC[i_sensor],v_poses[i_sensor]);
-                            
-                            if (!keyPose)
-                            {
-                                cout << "Not a key pose, moving to the next one." << endl;
-                                cout << "---------------------------------------------------" << endl;
-                                
-                                for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                    v_obsToDelete.push_back(v_obsC_indices[i_sensor]);
-                                
-                                continue;
-                            }
-                        }
-
-                        // Build vectors with individual observations
-                        vector< vector<T3DRangeScan> > v_isolatedObs(N_sensors);
-                        for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                        {
-                            v_isolatedObs[i_sensor]= vector<T3DRangeScan>(1,v_obsC[i_sensor]);
-                        }
-                        
-                        if ( ICP3D_method == "GICP" )
-                        {
-                            if ( accumulatePast )
-                            {
-                                if ( processInBlock )
-                                    refineLocationGICP3D( v_obs, v_obsC );
-                                else
-                                    for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                        refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor]  );
-                            }
-                            else
-                                refineLocationGICP3D( v_obs, v_obsC );
-                        }
-                        else // ICP3D
-                        {
-                            if ( accumulatePast )
-                            {
-                                if ( processInBlock )
-                                    refineLocationICP3D( v_obs, v_obsC );
-                                else
-                                    for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                        refineLocationICP3D( v_obs, v_isolatedObs[i_sensor]  );
-                            }
-                            else
-                                refineLocationICP3D( v_obs, v_obsC );
-                        }
-                        
-                        if ( accumulatePast )
-                            v_obs.insert(v_obs.end(), v_obsC.begin(), v_obsC.end() );
-                        else
-                            v_obs = v_obsC;
-                        
-                        // Time Statistics
-                        
-                        cout << "Time ellapsed      : " <<
-                                size_t(clockLoop.Tac()  / SECS_PER_MIN) << " min. " <<
-                                size_t(clockLoop.Tac()) % SECS_PER_MIN << " s." << endl;
-                        
-                        cout << "Total time ellapsed: " <<
-                                size_t(clockEllapsedICP3D.Tac()  / SECS_PER_MIN) << " min. " <<
-                                size_t(clockEllapsedICP3D.Tac()) % SECS_PER_MIN  << " s." << endl;
-                        
-                        cout << "---------------------------------------------------" << endl;
-                    }
-                }
-            }
+            time_icp3D = clock.Tac();
         }
         
         cout << "Mean goodness: "
@@ -1910,8 +2002,7 @@ int main(int argc, char **argv)
              << endl;
         
         cout << " done." << endl;
-        
-        time_icp3D = clock.Tac();
+
         
         
         TTimeStamp totalTime;
@@ -1919,26 +2010,27 @@ int main(int argc, char **argv)
         totalTime = secondsToTimestamp(time_icp3D);
         timestampToParts(totalTime,totalTimeParts);
         
-        cout << "---------------------------------------------------" << endl;
-        cout << "                 Time statistics" << endl;
-        cout << "---------------------------------------------------" << endl;
-        cout << "[INFO] time spent by the icp2D process: " << time_icp2D << " sec." << endl;
-        cout << "[INFO] time spent smoothing           : " << time_smoothing << " sec." << endl;
-        cout << "[INFO] time spent computing hulls     : " << time_overlapping << " sec." << endl;
-        cout << "[INFO] time spent by the icp3D process: " ;
+        cout << "  ---------------------------------------------------" << endl;
+        cout << "                   Time statistics" << endl;
+        cout << "  ---------------------------------------------------" << endl;
+        cout << "    [INFO] time spent by the icp2D process: " << time_icp2D << " sec." << endl;
+        cout << "    [INFO] time spent by difodo           : " << time_difodo << " sec." << endl;
+        cout << "    [INFO] time spent smoothing           : " << time_smoothing << " sec." << endl;
+        cout << "    [INFO] time spent computing hulls     : " << time_overlapping << " sec." << endl;
+        cout << "    [INFO] time spent by the icp3D process: " ;
         
         if ( time_icp3D )
         {
-            cout << totalTimeParts.hour << " hours " <<
-                    totalTimeParts.minute << " min. " <<
-                    totalTimeParts.second << " sec." << endl;
+            cout << (int)totalTimeParts.hour << " hours " <<
+                    (int)totalTimeParts.minute << " min. " <<
+                    (int)totalTimeParts.second << " sec." << endl;
         }
         else
             cout << time_icp3D << " sec." << endl;
         
         cout << "---------------------------------------------------" << endl;
         
-        cout << "[INFO] Saving obs to rawlog file " << o_rawlogFile << " ...";
+        cout << "  [INFO] Saving obs to rawlog file " << o_rawlogFileName << " ...";
         cout.flush();
         
         for ( size_t obs_index = 0; obs_index < v_3DRangeScans.size(); obs_index++ )
@@ -1951,7 +2043,7 @@ int main(int argc, char **argv)
             SF.insert( v_3DRangeScans[obs_index].obs );
             
             o_rawlog << v_3DRangeScans[obs_index].obs;
-        }        
+        }
 
         cout << " completed." << endl;
         
@@ -1959,7 +2051,7 @@ int main(int argc, char **argv)
         // Visualize 2D results
         //
         
-        cout << "[INFO] Visualizing 2D results ...";
+        cout << "  [INFO] Visualizing 2D results ...";
 
         if ( visualize2DResults )
         {
@@ -2000,7 +2092,7 @@ int main(int argc, char **argv)
         
     } catch (exception &e)
     {
-        cout << "HOMe exception caught: " << e.what() << endl;
+        cout << "OLT exception caught: " << e.what() << endl;
         return -1;
     }
     catch (...)
