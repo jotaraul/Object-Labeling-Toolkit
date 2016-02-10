@@ -86,6 +86,10 @@ ADD_LIBRARY(DIFODO ${difodo_sources} ${difodo_headers} )
 # Tell CMake that the linker language is C++
 SET_TARGET_PROPERTIES(DIFODO PROPERTIES LINKER_LANGUAGE CXX)
 
+IF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+	SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mtune=native")
+ENDIF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+
 
 # The debug post-fix of .dll /.so libs
 # ------------------------------------------

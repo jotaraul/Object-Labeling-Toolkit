@@ -33,37 +33,36 @@ using namespace mrpt::poses;
 
 
 
-void CDifodoDatasets::loadConfiguration(const utils::CConfigFileBase &ini )
+void CDifodoDatasets::loadConfiguration(unsigned int &i_rows, unsigned int &i_cols,
+                                        vector<CPose3D> &v_poses,
+                                        const string &rawlogFileName,
+                                        vector<unsigned int> &cameras_order )
 {	
 	fovh = M_PI*62.5/180.0;	//Larger FOV because depth is registered with color
 	fovv = M_PI*48.5/180.0;
-    cam_mode = ini.read_int("DIFODO_CONFIG", "cam_mode", 2, true); // The resolution of the images within the rawlog (1:640x480, 2:320x240)
+
+
+    rows = i_rows;
+    cols = i_cols;
+
+    cam_mode = 2;
+
 	fast_pyramid = false;
-    downsample = ini.read_int("DIFODO_CONFIG", "downsample", 1, true);
-	rows = ini.read_int("DIFODO_CONFIG", "rows", 240, true);
-	cols = ini.read_int("DIFODO_CONFIG", "cols", 320, true);
-	ctf_levels = ini.read_int("DIFODO_CONFIG", "ctf_levels", 5, true);
-	string filename = ini.read_string("DIFODO_CONFIG", "filename", "no file", true);
+
+    downsample = 1; // 1 - 640x480, 2 - 320x240, 4 - 160x120
+
+    ctf_levels = 5;
+
     fast_pyramid = true;
 
     //				Load cameras' extrinsic calibrations
     //==================================================================
 
-    vector<int> cams_order;
-    ini.read_vector("DIFODO_CONFIG","cams_order",vector<int>(0),cams_order,true);
+    cams_oder = cameras_order;
 
     for ( int c = 1; c <= NC; c++ )
     {
-        string sensorLabel = mrpt::format("RGBD_%i",cams_order[c-1]);
-
-        double x       = ini.read_double(sensorLabel,"x",0,true);
-        double y       = ini.read_double(sensorLabel,"y",0,true);
-        double z       = ini.read_double(sensorLabel,"z",0,true);
-        double yaw     = DEG2RAD(ini.read_double(sensorLabel,"yaw",0,true));
-        double pitch   = DEG2RAD(ini.read_double(sensorLabel,"pitch",0,true));
-        double roll    = DEG2RAD(ini.read_double(sensorLabel,"roll",0,true));
-
-        cam_pose[c-1].setFromValues(x,y,z,yaw,pitch,roll);
+        cam_pose[c-1] = v_poses[cameras_order[c-1]-1];
         CMatrixDouble44 homoMatrix;
         cam_pose[c-1].getHomogeneousMatrix(homoMatrix);
         calib_mat[c-1] = (CMatrixFloat44)homoMatrix.inverse();
@@ -72,13 +71,13 @@ void CDifodoDatasets::loadConfiguration(const utils::CConfigFileBase &ini )
 
 	//						Open Rawlog File
 	//==================================================================
-	if (!dataset.loadFromRawLogFile(filename))
+    if (!dataset.loadFromRawLogFile(rawlogFileName))
 		throw std::runtime_error("\nCouldn't open rawlog dataset file for input...");
 
 	rawlog_count = 0;
 
 	// Set external images directory:
-	const string imgsPath = CRawlog::detectImagesDirectory(filename);
+    const string imgsPath = CRawlog::detectImagesDirectory(rawlogFileName);
 	CImage::IMAGES_PATH_BASE = imgsPath;
 
 	//			Resize matrices and adjust parameters
@@ -328,11 +327,22 @@ void CDifodoDatasets::updateScene()
 	window.repaint();
 }
 
+int CDifodoDatasets::getCameraIndex( int camera )
+{
+    for ( size_t i = 0; i < NC; i++ )
+        if ( camera == cams_oder[i] )
+            return i;
+}
+
 void CDifodoDatasets::loadFrame()
 {
-    v_obs.clear();
+    v_processedObs.clear();
+    vector<CObservation3DRangeScanPtr> v_obs(NC); // set of obs
+    vector<bool> v_obs_loaded(NC,false); // Track the camera with an obs loaded
 
-    for (unsigned int c=0; c<NC; c++)
+    bool loadedFrame = false;
+
+    while ( !loadedFrame && !dataset_finished )
     {
         CObservationPtr alfa = dataset.getAsObservation(rawlog_count);
 
@@ -348,24 +358,48 @@ void CDifodoDatasets::loadFrame()
         }
 
         CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(alfa);
-        obs3D->load();
-        const CMatrix range = obs3D->rangeImage;
-        const unsigned int height = range.getRowCount();
-        const unsigned int width = range.getColCount();
 
-        for (unsigned int j = 0; j<cols; j++)
-            for (unsigned int i = 0; i<rows; i++)
+        string label = obs3D->sensorLabel;
+
+        size_t cameraIndex = getCameraIndex(atoi(label.substr(label.size()-1,label.size()).c_str()));
+
+        v_obs[cameraIndex]        = obs3D;
+        v_obs_loaded[cameraIndex] = true;
+
+        unsigned int sum = 0;
+
+        for ( size_t i_sensor = 0; i_sensor < NC; i_sensor++ )
+            sum += v_obs_loaded[i_sensor];
+
+        if ( sum == NC )
+        {
+            v_obs_loaded.clear();
+            v_obs_loaded.resize(NC,false);
+
+            for ( size_t c = 0; c < NC; c++ )
             {
-                const float z = range(height-downsample*i-1, width-downsample*j-1);
-                if (z < 4.5f)	depth_wf[c](i,j) = z;
-                else			depth_wf[c](i,j) = 0.f;
+                v_obs[c]->load();
+
+                const CMatrix range = v_obs[c]->rangeImage;
+                const unsigned int height = range.getRowCount();
+                const unsigned int width = range.getColCount();
+
+                for (unsigned int j = 0; j<cols; j++)
+                    for (unsigned int i = 0; i<rows; i++)
+                    {
+                        const float z = range(height-downsample*i-1, width-downsample*j-1);
+                        if (z < 4.5f)	depth_wf[c](i,j) = z;
+                        else			depth_wf[c](i,j) = 0.f;
+                    }
+
+                v_obs[c]->unload();
+                v_processedObs.push_back(v_obs[c]);
             }
 
-        v_obs.push_back(obs3D);
+            loadedFrame = true;
+        }
 
-        obs3D->unload();
-		rawlog_count++;
-        //rawlog_count += 4; 
+        rawlog_count++;
 
         if (dataset.size() <= rawlog_count)
             dataset_finished = true;

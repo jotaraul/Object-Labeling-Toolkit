@@ -1729,6 +1729,182 @@ void computeInitialGuessDifodo()
     cout << "  ---------------------------------------------------" << endl;
     cout << "          Computing initial poses with Difodo" << endl;
     cout << "  ---------------------------------------------------" << endl;
+
+    CDifodoDatasets odo;
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+    vector<CPose3D> v_poses;
+    vector<unsigned int> v_cameras_order;
+
+    unsigned int rows;
+    unsigned int cols;
+
+    bool exit = false, first = true;
+
+    // S
+    while ( !exit && CRawlog::getActionObservationPairOrObservation(i_rawlog,
+                                            action,observations,obs,obsIndex) )
+    {
+        // 3D range scan observation
+        if ( IS_CLASS(obs, CObservation3DRangeScan) )
+        {
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            string label = obs3D->sensorLabel;
+
+            if ( find(RGBD_sensors.begin(), RGBD_sensors.end(), label)
+                 == RGBD_sensors.end() )
+            {
+                RGBD_sensors.push_back(label);
+                unsigned int cam_index = atoi((label.substr(label.size()-1,label.size())).c_str());
+                v_cameras_order.push_back(cam_index);
+                v_poses.push_back(obs3D->sensorPose);
+            }
+
+            if ( RGBD_sensors.size() == 4 )
+                exit = true;
+
+            if (first)
+            {
+                rows = obs3D->rangeImage.rows();
+                cols = obs3D->rangeImage.cols();
+                first = false;
+            }
+        }
+    }
+
+    obsIndex = 0;
+
+    odo.loadConfiguration(rows,cols,v_poses,i_rawlogFileName,v_cameras_order);
+
+    odo.initializeScene();
+
+    //==============================================================================
+    //									Main operation
+    //==============================================================================
+
+    int pushed_key = 0;
+    bool working = 0, stop = 0;
+
+    //Necessary step before starting
+    odo.reset();
+
+    while(!odo.dataset_finished)
+    {
+        odo.loadFrame();
+        odo.odometryCalculation();
+
+        cout << endl << "    Difodo runtime(ms): " << odo.execution_time;
+        odo.updateScene();
+
+        vector<mrpt::obs::CObservation3DRangeScanPtr> &v_obs = odo.v_processedObs;
+
+        for ( size_t i = 0; i < v_obs.size(); i++ )
+        {
+            v_obs[i]->setSensorPose(odo.global_pose+odo.cam_pose[i]);
+            T3DRangeScan obs3D;
+            obs3D.obs = v_obs[i];
+            v_3DRangeScans.push_back(obs3D);
+            //o_rawlog << v_obs[i];
+        }
+    }
+
+    /*while (!stop)
+    {
+
+        if (odo.window.keyHit())
+            pushed_key = odo.window.getPushedKey();
+        else
+            pushed_key = 0;
+
+        switch (pushed_key) {
+
+        //Capture 1 new frame and calculate odometry
+        case  'n':
+            if (odo.dataset_finished)
+            {
+                working = 0;
+                cout << endl << "End of dataset.";
+                if (odo.f_res.is_open())
+                    odo.f_res.close();
+            }
+            else
+            {
+                odo.loadFrame();
+                odo.odometryCalculation();
+
+                if (odo.save_results == 1)
+                    odo.writeTrajectoryFile();
+
+                cout << endl << "    Difodo runtime(ms): " << odo.execution_time << endl;
+
+                odo.updateScene();
+
+                vector<mrpt::obs::CObservation3DRangeScanPtr> &v_obs = odo.v_processedObs;
+
+                for ( size_t i = 0; i < v_obs.size(); i++ )
+                {
+                    v_obs[i]->setSensorPose(odo.global_pose+odo.cam_pose[i]);
+                    T3DRangeScan obs3D;
+                    obs3D.obs = v_obs[i];
+                    v_3DRangeScans.push_back(obs3D);
+                    //o_rawlog << v_obs[i];
+                }
+            }
+
+            break;
+
+        //Start and stop continuous odometry
+        case 's':
+            working = !working;
+            break;
+
+        //Close the program
+        case 'e':
+            stop = 1;
+            if (odo.f_res.is_open())
+                odo.f_res.close();
+            break;
+
+        }
+
+        if (working == 1)
+        {
+            if (odo.dataset_finished)
+            {
+                working = 0;
+                cout << endl << "    End of dataset.";
+                if (odo.f_res.is_open())
+                    odo.f_res.close();
+                stop = 1;
+            }
+            else
+            {
+                odo.loadFrame();
+                odo.odometryCalculation();
+                if (odo.save_results == 1)
+                    odo.writeTrajectoryFile();
+
+                cout << endl << "    Difodo runtime(ms): " << odo.execution_time;
+                odo.updateScene();
+
+                vector<mrpt::obs::CObservation3DRangeScanPtr> &v_obs = odo.v_processedObs;
+
+                for ( size_t i = 0; i < v_obs.size(); i++ )
+                {
+                    v_obs[i]->setSensorPose(odo.global_pose+odo.cam_pose[i]);
+                    T3DRangeScan obs3D;
+                    obs3D.obs = v_obs[i];
+                    v_3DRangeScans.push_back(obs3D);
+                    //o_rawlog << v_obs[i];
+                }
+            }
+        }
+    }*/
 }
 
 //-----------------------------------------------------------
@@ -2002,8 +2178,9 @@ int main(int argc, char **argv)
              << endl;
         
         cout << " done." << endl;
-
         
+        //
+        // Prompt performance measurements
         
         TTimeStamp totalTime;
         TTimeParts totalTimeParts;
@@ -2029,8 +2206,12 @@ int main(int argc, char **argv)
             cout << time_icp3D << " sec." << endl;
         
         cout << "---------------------------------------------------" << endl;
+
+        //
+        // Save processed observations to file
         
         cout << "  [INFO] Saving obs to rawlog file " << o_rawlogFileName << " ...";
+
         cout.flush();
         
         for ( size_t obs_index = 0; obs_index < v_3DRangeScans.size(); obs_index++ )
@@ -2044,6 +2225,8 @@ int main(int argc, char **argv)
             
             o_rawlog << v_3DRangeScans[obs_index].obs;
         }
+
+        o_rawlog.close();
 
         cout << " completed." << endl;
         

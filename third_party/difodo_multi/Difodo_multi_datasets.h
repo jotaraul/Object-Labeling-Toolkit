@@ -21,12 +21,13 @@
 class CDifodoDatasets : public CDifodo {
 public:
 
-    std::vector<mrpt::obs::CObservation3DRangeScanPtr> v_obs;
+    std::vector<mrpt::obs::CObservation3DRangeScanPtr> v_processedObs;
 	mrpt::opengl::COpenGLScenePtr scene;	//!< Opengl scene
 	mrpt::gui::CDisplayWindow3D	window;
-	mrpt::obs::CRawlog	dataset;
+    mrpt::obs::CRawlog	dataset;
 	std::ifstream		f_gt;
 	std::ofstream		f_res;
+    std::vector<unsigned int> cams_oder;
 
 
 	unsigned int repr_level;
@@ -44,7 +45,10 @@ public:
 	}
 
 	/** Initialize the visual odometry method and loads the rawlog file */
-	void loadConfiguration( const mrpt::utils::CConfigFileBase &ini );
+    void loadConfiguration(unsigned int &i_rows, unsigned int &i_cols,
+                           std::vector<mrpt::poses::CPose3D> &v_poses,
+                           const std::string &rawlogFileName,
+                           std::vector<unsigned int> &cameras_order );
 
 	/** Load the depth image and the corresponding groundtruth pose */
 	void loadFrame();
@@ -69,4 +73,7 @@ public:
 	  *
 	  * Please visit http://vision.in.tum.de/data/datasets/rgbd-dataset/file_formats for further details.*/  
 	void writeTrajectoryFile();
+
+    /** Returns the index of a camera in the cams_order vector */
+    int getCameraIndex( int camera );
 };
