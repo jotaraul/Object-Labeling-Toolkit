@@ -60,6 +60,9 @@
 #include <pcl/registration/gicp.h>
 #include <pcl/registration/warp_point_rigid_3d.h>
 
+// DIFODO
+#include <Difodo_multi_datasets.h>
+
 //#include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/fast_bilateral.h>
 
