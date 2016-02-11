@@ -61,13 +61,7 @@ endif(PCL_FOUND)
 # --------------------------------------------
 
 find_package( OpenCV REQUIRED )
-#MESSAGE(STATUS "OpenCV libraries: " ${OpenCV_LIBS})
 #INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
-
-#MESSAGE(STATUS "Found OpenCV version: " ${OpenCV_VERSION})
-#MESSAGE(STATUS "Found include directories: " ${OpenCV_INCLUDE_DIRS})
-#MESSAGE(STATUS "Used as shared library: " ${OpenCV_SHARED})
-#MESSAGE(STATUS "Mangled paths: " ${OpenCV_LIB_COMPONENTS})
 
 # --------------------------------------------
 # Third party
@@ -87,7 +81,7 @@ ADD_LIBRARY(DIFODO ${difodo_sources} ${difodo_headers} )
 SET_TARGET_PROPERTIES(DIFODO PROPERTIES LINKER_LANGUAGE CXX)
 
 IF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
-	SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mtune=native")
+	SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mtune=native -march=native")
 ENDIF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
 
 
@@ -189,3 +183,19 @@ TARGET_LINK_LIBRARIES(Dataset_statistics ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
 ADD_EXECUTABLE(Calibrate ${CMAKE_SOURCE_DIR}/src/calibrate.cpp)
 TARGET_LINK_LIBRARIES(Calibrate ${PCL_LIBRARIES} ${MRPT_LIBS} )
+
+
+#------------------------------------------------------------------------------#
+#                          Status messages
+#------------------------------------------------------------------------------#
+
+IF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+	MESSAGE(STATUS "Compiler flags: " ${CMAKE_CXX_FLAGS_RELEASE})
+ENDIF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+
+#MESSAGE(STATUS "OpenCV libraries: " ${OpenCV_LIBS})
+#MESSAGE(STATUS "Found OpenCV version: " ${OpenCV_VERSION})
+#MESSAGE(STATUS "Found include directories: " ${OpenCV_INCLUDE_DIRS})
+#MESSAGE(STATUS "Used as shared library: " ${OpenCV_SHARED})
+#MESSAGE(STATUS "Mangled paths: " ${OpenCV_LIB_COMPONENTS})
+
