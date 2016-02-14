@@ -374,16 +374,16 @@ void equalizeCLAHE( CObservation3DRangeScanPtr obs3D )
 
 void showUsageInformation()
 {
-    cout << "Usage information. At least one expected argument: " << endl <<
-            " \t (1) Rawlog file." << endl;
-    cout << "Then, optional parameters:" << endl <<
-            " \t -config        : Configuration file." << endl <<
-            " \t -h             : Shows this help." << endl <<
-            " \t -only_hokuyo   : Process only hokuyo observations." << endl <<
-            " \t -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
-            " \t -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
-            " \t -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
-            " \t -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl;
+    cout << "  Usage information. At least one expected argument: " << endl <<
+            "    (1) Rawlog file." << endl;
+    cout << "  Then, optional parameters:" << endl <<
+            "    -config        : Configuration file." << endl <<
+            "    -h             : Shows this help." << endl <<
+            "    -only_hokuyo   : Process only hokuyo observations." << endl <<
+            "    -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
+            "    -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
+            "    -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
+            "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl << endl;
 }
 
 void decimateRawlog()
@@ -863,10 +863,10 @@ void replaceLabel()
 
 int loadParameters(int argc, char* argv[])
 {
-    i_rawlogFilename = argv[1];
-
     if ( argc >= 2 )
     {
+        i_rawlogFilename = argv[1];
+
         for ( size_t arg = 2; arg < argc; arg++ )
         {
             if ( !strcmp(argv[arg],"-decimate") )

@@ -117,7 +117,8 @@ bool processBySensor    = false;
 bool processInBlock     = false;
 bool visualize2DResults = true;
 size_t decimation       = 1;
-double scoreThreshold = 0.0;
+size_t decimateMemory   = 0;
+double scoreThreshold   = 0.0;
 
 string ICP3D_method;
 
@@ -170,6 +171,17 @@ vector< CObservation3DRangeScanPtr > v_pending3DRangeScans;
 vector< double >    v_goodness;
 vector<string>      RGBD_sensors;
 
+struct TTime
+{
+    float icp2D;
+    float difodo;
+    float icp3D;
+    float smoothing;
+    float overlapping;
+    TTime() : icp2D(0), difodo(0), icp3D(0), smoothing(0), overlapping(0)
+    {}
+}time_measures;
+
 
 //-----------------------------------------------------------
 //
@@ -179,22 +191,23 @@ vector<string>      RGBD_sensors;
 
 void showUsageInformation()
 {
-    cout << "Usage information. Two expected arguments: " << endl <<
-            " \t (1) Rawlog file." << endl <<
-            " \t (2) Points map file." << endl;
-    cout << "Then, optional parameters:" << endl <<
-            " \t -h             : Shows this help." << endl <<
-            " \t -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
-            " \t -enable_initialGuessGICP : Use GICP to get the initial guess." << endl <<
-            " \t -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
-            " \t -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
-            " \t -enable_memory : Accumulate 3D point clouds already registered." << endl <<
-            " \t -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
-            " \t -enable_keyPoses : Enable the use of key poses only." << endl <<
-            " \t -enable_manuallyFix <score>: Enable manual alignment when poor score." << endl <<
-            " \t -enable_processInBlock: Enable the processing of the obs from all sensors in block." << endl <<
-            " \t -enable_processBySensor: Align all the obs from a sensor with all the obs of other one." << endl <<
-            " \t -enable_RGBDdecimation: Permits to decimate the number of RGB observations to refine the sensors pose." << endl;
+    cout << "  Usage information. Two expected arguments: " << endl <<
+            "    (1) Rawlog file." << endl <<
+            "    (2) Points map file." << endl;
+    cout << "  Then, optional parameters:" << endl <<
+            "    -h             : Show this help." << endl <<
+            "    -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
+            "    -enable_initialGuessGICP : Use GICP to get the initial guess." << endl <<
+            "    -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
+            "    -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
+            "    -enable_memory : Accumulate 3D point clouds already registered." << endl <<
+            "    -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
+            "    -enable_keyPoses : Enable the use of key poses only." << endl <<
+            "    -enable_manuallyFix <score>: Enable manual alignment when poor score." << endl <<
+            "    -enable_processInBlock: Enable the processing of the obs from all sensors in block." << endl <<
+            "    -enable_processBySensor: Align all the obs from a sensor with all the obs of other one." << endl <<
+            "    -enable_RGBDdecimation: Permits to decimate the number of RGB observations to refine the sensors pose." << endl <<
+            "    -enable_memoryDecimation <num>: Decimate the number of obs in the memory by <num>." << endl;
 }
 
 
@@ -300,6 +313,14 @@ int loadParameters(int argc, char **argv)
             cout << "  [INFO] Enabled RGBD decimation, using only 1 of each ";
             cout << decimation << " RGBD observations." << endl;
         }
+        else if ( !strcmp(argv[arg], "-enable_memoryDecimation") )
+        {
+            decimateMemory = atoi(argv[arg+1]);
+
+            arg += 1;
+            cout << "  [INFO] Enabled memory decimation, using only 1 of each " <<
+                     decimateMemory << " RGBD observations in memory." << endl;
+        }
         else if ( !strcmp(argv[arg], "-h") )
         {
             showUsageInformation();
@@ -338,6 +359,82 @@ int loadParameters(int argc, char **argv)
     o_rawlogFileName += ".rawlog";
 }
 
+
+//-----------------------------------------------------------
+//
+//               showPerformanceMeasurements
+//
+//-----------------------------------------------------------
+
+void showPerformanceMeasurements()
+{
+    TTimeStamp totalTime;
+    TTimeParts totalTimeParts;
+    totalTime = secondsToTimestamp(time_measures.icp3D);
+    timestampToParts(totalTime,totalTimeParts);
+
+    cout << "  ---------------------------------------------------" << endl;
+    cout << "                   Time statistics" << endl;
+    cout << "  ---------------------------------------------------" << endl;
+    cout << "    [INFO] time spent by the icp2D process: " << time_measures.icp2D << " sec." << endl;
+    cout << "    [INFO] time spent by difodo           : " << time_measures.difodo << " sec." << endl;
+    cout << "    [INFO] time spent smoothing           : " << time_measures.smoothing << " sec." << endl;
+    cout << "    [INFO] time spent computing hulls     : " << time_measures.overlapping << " sec." << endl;
+    cout << "    [INFO] time spent by the icp3D process: " ;
+
+    if ( time_measures.icp3D )
+    {
+        cout << (int)totalTimeParts.hour << " hours " <<
+                (int)totalTimeParts.minute << " min. " <<
+                (int)totalTimeParts.second << " sec." << endl;
+    }
+    else
+        cout << time_measures.icp3D << " sec." << endl;
+
+    cout << "---------------------------------------------------" << endl;
+}
+
+//-----------------------------------------------------------
+//
+//                     visualizeResults
+//
+//-----------------------------------------------------------
+
+void visualizeResults()
+{
+    cout << "  [INFO] Visualizing 2D results ...";
+    cout.flush();
+
+    win.hold_on();
+
+    CVectorDouble coord_x, coord_y;
+    for ( size_t pos_index = 0; pos_index < v_robotPoses.size(); pos_index++ )
+    {
+        coord_x.push_back(v_robotPoses[pos_index].pose[0]);
+        coord_y.push_back(v_robotPoses[pos_index].pose[1]);
+    }
+
+    win.plot(coord_x,coord_y,"-m.3");
+    win.plot(coord_x,coord_y,"k.9");
+
+    CVectorDouble coord_x2, coord_y2;
+
+    for ( size_t pos_index = 0; pos_index < v_3DRangeScans.size(); pos_index++ )
+    {
+        CPose3D pose;
+        CVectorDouble v_coords;
+        v_3DRangeScans[pos_index].obs ->getSensorPose(pose);
+        pose.getAsVector(v_coords);
+        coord_x2.push_back(v_coords[0]);
+        coord_y2.push_back(v_coords[1]);
+    }
+
+    win.plot(coord_x2,coord_y2,"g.8");
+
+    v_3DRangeScans.clear(); // Release some memory!
+
+    win.waitForKey();
+}
 
 //-----------------------------------------------------------
 //
@@ -400,6 +497,33 @@ void smoothObss()
     }
 
     cout << "done!" << endl;
+}
+
+
+//-----------------------------------------------------------
+//
+//                    computeConvexHulls
+//
+//-----------------------------------------------------------
+
+void computeConvexHulls()
+{
+    cout << "  [INFO] Computing convex hulls to check overlapping... ";
+
+    for ( size_t i = 0; i < v_3DRangeScans.size(); i++ )
+    {
+        // Get point cloud of old observation
+        pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud ( new pcl::PointCloud<pcl::PointXYZ>());
+        v_3DRangeScans[i].obs->project3DPointsFromDepthImageInto(*pointCloud,true);
+
+        pcl::ConvexHull<pcl::PointXYZ> convex_hull;
+        convex_hull.setInputCloud(pointCloud);
+        convex_hull.setDimension(3);
+        convex_hull.reconstruct(*v_3DRangeScans[i].convexHullCloud,
+                                v_3DRangeScans[i].polygons);
+    }
+
+    cout << " done." << endl;
 }
 
 
@@ -995,9 +1119,11 @@ void manuallyFixAlign( vector<T3DRangeScan> &v_obs,
 //
 //-----------------------------------------------------------
 
-void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_obs2 )
+void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
+                           vector<T3DRangeScan> &v_obs2,
+                           CPose3D              &correction)
 {
-    if (!initialGuessICP2D)
+    if (!initialGuessICP2D && !initialGuessDifodo)
     {
         for (size_t i=0; i < v_obs2.size(); i++)
         {
@@ -1012,8 +1138,8 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
     //M1.insertionOptions.minDistBetweenLaserPoints = 0.01;
     //M2.insertionOptions.minDistBetweenLaserPoints = 0.01;
     
-    CTicTac clockInsertionTime;
-    clockInsertionTime.Tic();
+    CTicTac clock;
+    clock.Tic();
 
     // Insert observations into a points map
     
@@ -1022,7 +1148,9 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
         
         if ( !useOverlappingObs )
         {
-            M1.insertObservationPtr( v_obs[i].obs );
+            // Memory decimation?
+            if ( !decimateMemory  || (i < RGBD_sensors.size()*3) || !( i%decimateMemory ) )
+                M1.insertObservationPtr( v_obs[i].obs );
         }
         else
         {
@@ -1077,9 +1205,9 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
     for ( size_t i = 0; i < v_obs2.size(); i++ )
         M2.insertObservationPtr( v_obs2[i].obs );
     
-    cout << "Time spent inserting points: " << clockInsertionTime.Tac() << " s." << endl;
+    cout << "    Time spent inserting points: " << clock.Tac() << " s." << endl;
     
-    cout << "Getting points... points 1: ";
+    cout << "    Getting points... points 1: ";
     
     CVectorDouble xs, ys, zs, xs2, ys2, zs2;
     M1.getAllPoints(xs,ys,zs);
@@ -1128,232 +1256,37 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_
     
     //cout << "done"  << endl;
     
-    cout << "Doing GICP...";
+    cout << "    Doing GICP...";
     
-    gicp.align(*cloud_trans);
+    clock.Tic();
+    gicp.align(*cloud_trans);    
     
     double score;
     score = gicp.getFitnessScore(); // Returns the squared average error between the aligned input and target
     
     v_goodness.push_back(score);
     
-    cout << " done! Average error: " << sqrt(score) << " meters" << endl;
+    cout << " done! Average error: " << sqrt(score) << " meters" <<
+            " time spent: " << clock.Tac() << " s." << endl;
     
     // Obtain the transformation that aligned cloud_source to cloud_source_registered
     Eigen::Matrix4f transformation = gicp.getFinalTransformation();
-    
-    CPose3D estimated_pose;
     
     CMatrixDouble33 rot_matrix;
     for (unsigned int i=0; i<3; i++)
         for (unsigned int j=0; j<3; j++)
             rot_matrix(i,j) = transformation(i,j);
     
-    estimated_pose.setRotationMatrix(rot_matrix);
-    estimated_pose.x(transformation(0,3));
-    estimated_pose.y(transformation(1,3));
-    estimated_pose.z(transformation(2,3));
+    correction.setRotationMatrix(rot_matrix);
+    correction.x(transformation(0,3));
+    correction.y(transformation(1,3));
+    correction.z(transformation(2,3));
     
     if ( sqrt(score) > scoreThreshold && manuallyFix )
-        manuallyFixAlign( v_obs, v_obs2, estimated_pose );
+        manuallyFixAlign( v_obs, v_obs2, correction );
     
     if ( processBySensor )
-        cout << estimated_pose;
-    
-    for ( size_t i = 0; i < v_obs2.size(); i++ )
-    {
-        CObservation3DRangeScanPtr obs = v_obs2[i].obs;
-        
-        CPose3D pose;
-        obs->getSensorPose( pose );
-        
-        CPose3D finalPose = estimated_pose + pose;
-        obs->setSensorPose(finalPose);
-        
-        
-        //cout << "Location set done" << endl;
-    }
-}
-
-
-//-----------------------------------------------------------
-//
-//                refineLocationGICP3DBis
-//
-//-----------------------------------------------------------
-
-void refineLocationGICP3DBis( vector<CObservation3DRangeScanPtr> &v_obs, vector<CObservation3DRangeScanPtr> &v_obs2 )
-{
-    CDisplayWindow3D window2("ICP-3D demo: UNALIGNED scans",500,500);
-    CDisplayWindow3D window3("ICP-3D demo: ICP-ALIGNED scans",500,500);
-    
-    COpenGLScenePtr scene2=COpenGLScene::Create();
-    COpenGLScenePtr scene3=COpenGLScene::Create();
-    
-    window2.get3DSceneAndLock()=scene2;
-    window3.get3DSceneAndLock()=scene3;
-    
-    opengl::CGridPlaneXYPtr plane1=CGridPlaneXY::Create(-20,20,-20,20,0,1);
-    plane1->setColor(0.3,0.3,0.3);
-    
-    scene2->insert(plane1);
-    scene3->insert(plane1);
-    
-    // Show in Windows:
-    
-    window->setCameraElevationDeg(15);
-    window->setCameraAzimuthDeg(90);
-    window->setCameraZoom(15);
-    
-    window2.setCameraElevationDeg(15);
-    window2.setCameraAzimuthDeg(90);
-    window2.setCameraZoom(15);
-    
-    window3.setCameraElevationDeg(15);
-    window3.setCameraAzimuthDeg(90);
-    window3.setCameraZoom(15);
-    
-    // Show the scanned points:
-    CSimplePointsMap	M1,M2,M3;
-    
-    for ( size_t i = 0; i < v_obs.size(); i++ )
-        M1.insertObservationPtr( v_obs[i] );
-    
-    for ( size_t i = 0; i < v_obs2.size(); i++ )
-        M2.insertObservationPtr( v_obs2[i] );
-    
-    cout << "Getting points... points 1: ";
-    
-    CVectorDouble xs, ys, zs, xs2, ys2, zs2;
-    M1.getAllPoints(xs,ys,zs);
-    M2.getAllPoints(xs2,ys2,zs2);
-    
-    cout << xs.size() << " points 2: " << xs2.size() << endl;
-    
-    
-    CSetOfObjectsPtr  PTNS1 = CSetOfObjects::Create();
-    CSetOfObjectsPtr  PTNS2 = CSetOfObjects::Create();
-    CSetOfObjectsPtr  PTNS2_ALIGN = CSetOfObjects::Create();
-    
-    CPointsMap::COLOR_3DSCENE_R = 1;
-    CPointsMap::COLOR_3DSCENE_G = 0;
-    CPointsMap::COLOR_3DSCENE_B = 0;
-    M1.getAs3DObject(PTNS1);
-    
-    CPointsMap::COLOR_3DSCENE_R = 0;
-    CPointsMap::COLOR_3DSCENE_G = 0;
-    CPointsMap::COLOR_3DSCENE_B = 1;
-    M2.getAs3DObject(PTNS2);
-    
-    scene2->insert( PTNS1 );
-    scene2->insert( PTNS2 );
-    
-    
-    scene3->insert( PTNS1 );
-    scene3->insert( PTNS2_ALIGN );
-    
-    window2.unlockAccess3DScene();
-    window2.forceRepaint();
-    window3.unlockAccess3DScene();
-    window3.forceRepaint();
-    
-    //cout << "Inserting points...";
-    
-    PointCloud<PointXYZ>::Ptr	cloud_old   (new PointCloud<PointXYZ>());
-    PointCloud<PointXYZ>::Ptr	cloud_new   (new PointCloud<PointXYZ>());
-    PointCloud<PointXYZ>::Ptr   cloud_trans (new PointCloud<PointXYZ>());
-    
-    cloud_old->clear();
-    cloud_new->clear();
-    cloud_trans->clear();
-    
-    for ( size_t i = 0; i < xs.size(); i+=10 )
-        cloud_old->push_back(PointXYZ(xs[i],ys[i],zs[i]));
-    
-    for ( size_t i = 0; i < xs2.size(); i+=10 )
-        cloud_new->push_back(PointXYZ(xs2[i],ys2[i],zs2[i]));
-    
-    //cout << "done" << endl;
-    
-    // Esa para GICP, si quieres el normal solo le tienes que quitar lo de Generalized
-    GeneralizedIterativeClosestPoint<PointXYZ, PointXYZ> gicp;
-    
-    //cout << "Setting input clouds...";
-    
-    gicp.setInputTarget(cloud_new);
-    gicp.setInputTarget(cloud_old);
-    
-    //cout << "done"  << endl;
-    //cout << "Setting parameters...";
-    
-    //ICP options
-    gicp.setMaxCorrespondenceDistance (0.5);
-    // Set the maximum number of iterations (criterion 1)
-    gicp.setMaximumIterations (100);
-    // Set the transformation tras epsilon (criterion 2)
-    gicp.setTransformationEpsilon (1e-6);
-    // Set the transformation rot epsilon (criterion 3)
-    gicp.setRotationEpsilon (1e-6);
-    
-    //cout << "done"  << endl;
-    
-    cout << "Doing ICP...";
-    
-    gicp.align(*cloud_trans);
-    
-    double score;
-    score = gicp.getFitnessScore(); // Returns the squared average error between the aligned input and target
-    
-    v_goodness.push_back(score);
-    
-    cout << "Done! Average error: " << sqrt(score) << " meters" << endl;
-    
-    // Obtain the transformation that aligned cloud_source to cloud_source_registered
-    Eigen::Matrix4f transformation = gicp.getFinalTransformation();
-    
-    CPose3D estimated_pose;
-    
-    //cout << "Transformation" << endl;
-    //cout << transformation << endl;
-    
-    CMatrixDouble33 rot_matrix;
-    for (unsigned int i=0; i<3; i++)
-        for (unsigned int j=0; j<3; j++)
-            rot_matrix(i,j) = transformation(i,j);
-    
-    estimated_pose.setRotationMatrix(rot_matrix);
-    estimated_pose.x(transformation(0,3));
-    estimated_pose.y(transformation(1,3));
-    estimated_pose.z(transformation(2,3));
-    
-    CVectorDouble v_pose;
-    estimated_pose.getAsVector(v_pose);
-    
-    cout << "Pose: " << v_pose << endl;
-    
-    //cout << "Pose set done" << endl;
-    
-    for ( size_t i = 0; i < v_obs2.size(); i++ )
-    {
-        CObservation3DRangeScanPtr obs = v_obs2[i];
-        
-        CPose3D pose;
-        obs->getSensorPose( pose );
-        
-        CPose3D finalPose = estimated_pose + pose;
-        obs->setSensorPose(finalPose);
-        
-        M3.insertObservationPtr( obs );
-    }
-    
-    CPointsMap::COLOR_3DSCENE_R = 0;
-    CPointsMap::COLOR_3DSCENE_G = 1;
-    CPointsMap::COLOR_3DSCENE_B = 0;
-    M3.getAs3DObject(PTNS2_ALIGN);
-    
-    //window2.waitForKey();
-    
-    //cout << "Location set done" << endl;
+        cout << correction;
 }
 
 
@@ -1527,9 +1460,9 @@ void refineICP3D()
 
     if ( processBySensor )
     {
-        cout << "---------------------------------------------------" << endl;
-        cout << "      Getting relative position among devices " << ICP3D_method << endl;
-        cout << "---------------------------------------------------" << endl;
+        cout << "  -------------------------------------------------" << endl;
+        cout << "       Getting relative position among devices " << ICP3D_method << endl;
+        cout << "  -------------------------------------------------" << endl;
 
         vector< vector <T3DRangeScan> > v_allObs(N_sensors);  // Past set of obs
 
@@ -1545,16 +1478,23 @@ void refineICP3D()
             cout << "Relative transformation from device " << device_index;
             cout << " to 0"<< endl;
 
-            refineLocationGICP3D( v_allObs[0], v_allObs[device_index] );
+            CPose3D correction;
+
+            refineLocationGICP3D( v_allObs[0], v_allObs[device_index], correction );
+
+            for ( size_t i = 0; i < v_allObs[device_index].size(); i++ )
+                v_allObs[device_index][i].obs->sensorPose =
+                        correction + v_allObs[device_index][i].obs->sensorPose;
+
             cout << " <-- this"<< endl;
         }
     }
     else
     {
 
-        cout << "---------------------------------------------------" << endl;
-        cout << "         Refining sensor poses using " << ICP3D_method << endl;
-        cout << "---------------------------------------------------" << endl;
+        cout << "  -------------------------------------------------" << endl;
+        cout << "          Refining sensor poses using " << ICP3D_method << endl;
+        cout << "  -------------------------------------------------" << endl;
 
 
         vector<T3DRangeScan> v_obs;  // Past set of obs
@@ -1571,10 +1511,12 @@ void refineICP3D()
 
         for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
         {
+            //cout << "200: " << v_3DRangeScans[200].obs->sensorPose << endl;
+
             CTicTac clockLoop;
             clockLoop.Tic();
 
-            T3DRangeScan obs = v_3DRangeScans[obsIndex];
+            T3DRangeScan &obs = v_3DRangeScans[obsIndex];
 
             size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
 
@@ -1595,7 +1537,8 @@ void refineICP3D()
                 v_obs_loaded.clear();
                 v_obs_loaded.resize(N_sensors,false);
 
-                cout << "Working set of obs index... " << set_index++ << " of approx. " << (double)N_scans/N_sensors << endl;
+                cout << "    Working set of obs index... " << set_index++ <<
+                        " of approx. " << (double)N_scans/N_sensors << endl;
 
                 if ( first )
                 {
@@ -1611,7 +1554,7 @@ void refineICP3D()
 
                         for ( size_t i_sensor = 1; i_sensor < N_sensors; i_sensor++ )
                         {
-                            cout << "Time diff: " << timeDifference(t1,v_obs[i_sensor].obs->timestamp) << endl;
+                            cout << "    Time diff: " << timeDifference(t1,v_obs[i_sensor].obs->timestamp) << endl;
                             CPose3D estimated_pose;
                             //v_obs[i_sensor].obs->getSensorPose(estimated_pose);
 
@@ -1652,8 +1595,8 @@ void refineICP3D()
 
                     if (!keyPose)
                     {
-                        cout << "Not a key pose, moving to the next one." << endl;
-                        cout << "---------------------------------------------------" << endl;
+                        cout << "    Not a key pose, moving to the next one." << endl;
+                        cout << "    ---------------------------------------------------" << endl;
 
                         for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
                             v_obsToDelete.push_back(v_obsC_indices[i_sensor]);
@@ -1667,6 +1610,7 @@ void refineICP3D()
                 for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
                 {
                     v_isolatedObs[i_sensor]= vector<T3DRangeScan>(1,v_obsC[i_sensor]);
+                    //cout << i_sensor << "  " << v_isolatedObs[i_sensor][0].obs->sensorPose << endl;
                 }
 
                 if ( ICP3D_method == "GICP" )
@@ -1674,13 +1618,76 @@ void refineICP3D()
                     if ( accumulatePast )
                     {
                         if ( processInBlock )
-                            refineLocationGICP3D( v_obs, v_obsC );
+                        {
+                            CPose3D correction;
+                            refineLocationGICP3D( v_obs, v_obsC, correction );
+
+                            for ( size_t i = 0; i < v_obsC.size(); i++ )
+                                v_obsC[i].obs->sensorPose =
+                                        correction + v_obsC[i].obs->sensorPose;
+
+                        }
                         else
+                        {
+                            #pragma omp parallel for
+
                             for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                            {
+                                CPose3D correction;
+                                refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor],correction );
+
+                                // Compose correction with initial guess
+                                CObservation3DRangeScanPtr obs = v_isolatedObs[i_sensor][0].obs;
+
+                                CPose3D pose;
+                                obs->getSensorPose( pose );
+
+                                CPose3D finalPose = correction + pose;
+                                obs->setSensorPose(finalPose);
+
+                                // Propagate the correction to the remaining obs to process
+                                for ( size_t i_obs = obsIndex+1; i_obs < N_scans; i_obs++ )
+                                {
+                                    if ( v_3DRangeScans[i_obs].obs->sensorLabel ==
+                                         RGBD_sensors[i_sensor] )
+                                    {
+                                        v_3DRangeScans[i_obs].obs->sensorPose =
+                                            correction + v_3DRangeScans[i_obs].obs->sensorPose;
+                                    }
+                                }
+
+                            }
+                        }
                     }
                     else
-                        refineLocationGICP3D( v_obs, v_obsC );
+                    {
+                        for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
+                        {
+                            CPose3D correction;
+                            refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor],correction );
+
+                            // Compose correction with initial guess
+                            CObservation3DRangeScanPtr obs = v_isolatedObs[i_sensor][0].obs;
+
+                            CPose3D pose;
+                            obs->getSensorPose( pose );
+
+                            CPose3D finalPose = correction + pose;
+                            obs->setSensorPose(finalPose);
+
+                            // Propagate the correction to the remaining obs to process
+                            for ( size_t i_obs = obsIndex+1; i_obs < N_scans; i_obs++ )
+                            {
+                                if ( v_3DRangeScans[i_obs].obs->sensorLabel ==
+                                     RGBD_sensors[i_sensor] )
+                                {
+                                    v_3DRangeScans[i_obs].obs->sensorPose =
+                                    correction+v_3DRangeScans[i_obs].obs->sensorPose;
+                                }
+                            }
+
+                        }
+                    }
                 }
                 else // ICP3D
                 {
@@ -1703,15 +1710,15 @@ void refineICP3D()
 
                 // Time Statistics
 
-                cout << "Time ellapsed      : " <<
+                cout << "    Time ellapsed      : " <<
                         size_t(clockLoop.Tac()  / SECS_PER_MIN) << " min. " <<
                         size_t(clockLoop.Tac()) % SECS_PER_MIN << " s." << endl;
 
-                cout << "Total time ellapsed: " <<
+                cout << "    Total time ellapsed: " <<
                         size_t(clockEllapsedICP3D.Tac()  / SECS_PER_MIN) << " min. " <<
                         size_t(clockEllapsedICP3D.Tac()) % SECS_PER_MIN  << " s." << endl;
 
-                cout << "---------------------------------------------------" << endl;
+                cout << "    ---------------------------------------------------" << endl;
             }
         }
     }
@@ -1726,9 +1733,10 @@ void refineICP3D()
 
 void computeInitialGuessDifodo()
 {
-    cout << "  ---------------------------------------------------" << endl;
-    cout << "          Computing initial poses with Difodo" << endl;
-    cout << "  ---------------------------------------------------" << endl;
+    cout << endl;
+    cout << "  -------------------------------------------------" << endl;
+    cout << "         Computing initial poses with Difodo" << endl;
+    cout << "  -------------------------------------------------" << endl;
 
     CDifodoDatasets odo;
 
@@ -1736,15 +1744,19 @@ void computeInitialGuessDifodo()
     CSensoryFramePtr observations;
     CObservationPtr obs;
     size_t obsIndex = 0;
+
+    // Difodo configuration parameters
     vector<CPose3D> v_poses;
     vector<unsigned int> v_cameras_order;
 
     unsigned int rows;
     unsigned int cols;
 
+    //
+    // Get difodo configuration parameters according to the current dataset
+
     bool exit = false, first = true;
 
-    // S
     while ( !exit && CRawlog::getActionObservationPairOrObservation(i_rawlog,
                                             action,observations,obs,obsIndex) )
     {
@@ -1777,15 +1789,15 @@ void computeInitialGuessDifodo()
         }
     }
 
-    obsIndex = 0;
+    //
+    // Load configuration
 
     odo.loadConfiguration(rows,cols,v_poses,i_rawlogFileName,v_cameras_order);
 
-    odo.initializeScene();
+    //
+    // Main operation
 
-    //==============================================================================
-    //									Main operation
-    //==============================================================================
+    odo.initializeScene();
 
     int pushed_key = 0;
     bool working = 0, stop = 0;
@@ -1793,12 +1805,16 @@ void computeInitialGuessDifodo()
     //Necessary step before starting
     odo.reset();
 
+    vector<float> v_difodoRunTimes;
+
     while(!odo.dataset_finished)
     {
         odo.loadFrame();
         odo.odometryCalculation();
 
         cout << endl << "    Difodo runtime(ms): " << odo.execution_time;
+        v_difodoRunTimes.push_back(odo.execution_time);
+
         odo.updateScene();
 
         vector<mrpt::obs::CObservation3DRangeScanPtr> &v_obs = odo.v_processedObs;
@@ -1813,98 +1829,9 @@ void computeInitialGuessDifodo()
         }
     }
 
-    /*while (!stop)
-    {
-
-        if (odo.window.keyHit())
-            pushed_key = odo.window.getPushedKey();
-        else
-            pushed_key = 0;
-
-        switch (pushed_key) {
-
-        //Capture 1 new frame and calculate odometry
-        case  'n':
-            if (odo.dataset_finished)
-            {
-                working = 0;
-                cout << endl << "End of dataset.";
-                if (odo.f_res.is_open())
-                    odo.f_res.close();
-            }
-            else
-            {
-                odo.loadFrame();
-                odo.odometryCalculation();
-
-                if (odo.save_results == 1)
-                    odo.writeTrajectoryFile();
-
-                cout << endl << "    Difodo runtime(ms): " << odo.execution_time << endl;
-
-                odo.updateScene();
-
-                vector<mrpt::obs::CObservation3DRangeScanPtr> &v_obs = odo.v_processedObs;
-
-                for ( size_t i = 0; i < v_obs.size(); i++ )
-                {
-                    v_obs[i]->setSensorPose(odo.global_pose+odo.cam_pose[i]);
-                    T3DRangeScan obs3D;
-                    obs3D.obs = v_obs[i];
-                    v_3DRangeScans.push_back(obs3D);
-                    //o_rawlog << v_obs[i];
-                }
-            }
-
-            break;
-
-        //Start and stop continuous odometry
-        case 's':
-            working = !working;
-            break;
-
-        //Close the program
-        case 'e':
-            stop = 1;
-            if (odo.f_res.is_open())
-                odo.f_res.close();
-            break;
-
-        }
-
-        if (working == 1)
-        {
-            if (odo.dataset_finished)
-            {
-                working = 0;
-                cout << endl << "    End of dataset.";
-                if (odo.f_res.is_open())
-                    odo.f_res.close();
-                stop = 1;
-            }
-            else
-            {
-                odo.loadFrame();
-                odo.odometryCalculation();
-                if (odo.save_results == 1)
-                    odo.writeTrajectoryFile();
-
-                cout << endl << "    Difodo runtime(ms): " << odo.execution_time;
-                odo.updateScene();
-
-                vector<mrpt::obs::CObservation3DRangeScanPtr> &v_obs = odo.v_processedObs;
-
-                for ( size_t i = 0; i < v_obs.size(); i++ )
-                {
-                    v_obs[i]->setSensorPose(odo.global_pose+odo.cam_pose[i]);
-                    T3DRangeScan obs3D;
-                    obs3D.obs = v_obs[i];
-                    v_3DRangeScans.push_back(obs3D);
-                    //o_rawlog << v_obs[i];
-                }
-            }
-        }
-    }*/
+    float sum = accumulate(v_difodoRunTimes.begin(),v_difodoRunTimes.end(),0.0);
+    float avg = sum / (float)v_difodoRunTimes.size();
+    cout << endl << "  [INFO] Difodo average run time: " << avg/1000 << " sec. " << endl;
 }
 
 //-----------------------------------------------------------
@@ -1915,9 +1842,10 @@ void computeInitialGuessDifodo()
 
 void computeInitialGuessICP2D()
 {
-    cout << "  ---------------------------------------------------" << endl;
-    cout << "          Computing initial poses with ICP2D" << endl;
-    cout << "  ---------------------------------------------------" << endl;
+    cout << endl;
+    cout << "  -------------------------------------------------" << endl;
+    cout << "         Computing initial poses with ICP2D" << endl;
+    cout << "  -------------------------------------------------" << endl;
 
     CActionCollectionPtr action;
     CSensoryFramePtr observations;
@@ -1993,9 +1921,10 @@ void computeInitialGuessICP2D()
 
 void computeInitialGuessOnlyFill()
 {
-    cout << "  ---------------------------------------------------" << endl;
-    cout << "               Filling initial poses" << endl;
-    cout << "  ---------------------------------------------------" << endl;
+    cout << endl;
+    cout << "  -------------------------------------------------" << endl;
+    cout << "              Filling initial poses" << endl;
+    cout << "  -------------------------------------------------" << endl;
 
     CActionCollectionPtr action;
     CSensoryFramePtr observations;
@@ -2054,8 +1983,6 @@ int main(int argc, char **argv)
     try
     {
         CTicTac clock;
-        double time_icp2D = 0, time_difodo = 0, time_icp3D = 0,
-                time_smoothing = 0, time_overlapping = 0;
 
         //
         // Load parameters
@@ -2097,19 +2024,15 @@ int main(int argc, char **argv)
         if ( initialGuessICP2D )
         {
             clock.Tic();
-
             computeInitialGuessICP2D();
-
-            time_icp2D = clock.Tac();
+            time_measures.icp2D = clock.Tac();
 
         }
         else if ( initialGuessDifodo )
         {
             clock.Tic();
-
             computeInitialGuessDifodo();
-
-            time_difodo = clock.Tac();
+            time_measures.difodo = clock.Tac();
         }
         else // If not using ICP2D initial guess, just fill the vector of 3D obs
         {
@@ -2125,10 +2048,8 @@ int main(int argc, char **argv)
         if ( smooth3DObs )
         {
             clock.Tic();
-
-            smoothObss(); // TODO: This colud be leveraged by DIFODO, refactor it for that
-            
-            time_smoothing = clock.Tac();
+            smoothObss(); // TODO: This colud be leveraged by DIFODO, refactor it for that            
+            time_measures.smoothing = clock.Tac();
         }
         
         //
@@ -2136,41 +2057,20 @@ int main(int argc, char **argv)
         
         if ( useOverlappingObs )
         {
-            cout << "  [INFO] Computing convex hulls to check overlapping... ";
-            
             clock.Tic();
-            
-            for ( size_t i = 0; i < v_3DRangeScans.size(); i++ )
-            {
-                // Get point cloud of old observation
-                pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud ( new pcl::PointCloud<pcl::PointXYZ>());
-                v_3DRangeScans[i].obs->project3DPointsFromDepthImageInto(*pointCloud,true);
-                
-                pcl::ConvexHull<pcl::PointXYZ> convex_hull;
-                convex_hull.setInputCloud(pointCloud);
-                convex_hull.setDimension(3);
-                convex_hull.reconstruct(*v_3DRangeScans[i].convexHullCloud,
-                                        v_3DRangeScans[i].polygons);
-            }
-            
-            time_overlapping = clock.Tac();
-            
-            cout << " done." << endl;
+            computeConvexHulls();
+            time_measures.overlapping = clock.Tac();
+
         }
         
         //
         // Refine using ICP3D
-        //
-        
 
-        
         if ( refineWithICP3D )
         {
-            clock.Tic();
-            
+            clock.Tic();            
             refineICP3D();
-
-            time_icp3D = clock.Tac();
+            time_measures.icp3D = clock.Tac();
         }
         
         cout << "Mean goodness: "
@@ -2182,30 +2082,7 @@ int main(int argc, char **argv)
         //
         // Prompt performance measurements
         
-        TTimeStamp totalTime;
-        TTimeParts totalTimeParts;
-        totalTime = secondsToTimestamp(time_icp3D);
-        timestampToParts(totalTime,totalTimeParts);
-        
-        cout << "  ---------------------------------------------------" << endl;
-        cout << "                   Time statistics" << endl;
-        cout << "  ---------------------------------------------------" << endl;
-        cout << "    [INFO] time spent by the icp2D process: " << time_icp2D << " sec." << endl;
-        cout << "    [INFO] time spent by difodo           : " << time_difodo << " sec." << endl;
-        cout << "    [INFO] time spent smoothing           : " << time_smoothing << " sec." << endl;
-        cout << "    [INFO] time spent computing hulls     : " << time_overlapping << " sec." << endl;
-        cout << "    [INFO] time spent by the icp3D process: " ;
-        
-        if ( time_icp3D )
-        {
-            cout << (int)totalTimeParts.hour << " hours " <<
-                    (int)totalTimeParts.minute << " min. " <<
-                    (int)totalTimeParts.second << " sec." << endl;
-        }
-        else
-            cout << time_icp3D << " sec." << endl;
-        
-        cout << "---------------------------------------------------" << endl;
+        showPerformanceMeasurements();
 
         //
         // Save processed observations to file
@@ -2232,42 +2109,10 @@ int main(int argc, char **argv)
         
         //
         // Visualize 2D results
-        //
-        
-        cout << "  [INFO] Visualizing 2D results ...";
 
         if ( visualize2DResults )
         {
-            win.hold_on();
-            
-            CVectorDouble coord_x, coord_y;
-            for ( size_t pos_index = 0; pos_index < v_robotPoses.size(); pos_index++ )
-            {
-                CVectorDouble v_coords;
-                //v_robotPoses[pos_index].pose.getAsVector(v_coords);
-                coord_x.push_back(v_robotPoses[pos_index].pose[0]);
-                coord_y.push_back(v_robotPoses[pos_index].pose[1]);
-            }
-            
-            win.plot(coord_x,coord_y,"-m.3");
-            win.plot(coord_x,coord_y,"k.9");
-            
-            CVectorDouble coord_x2, coord_y2;
-            
-            for ( size_t pos_index = 0; pos_index < v_3DRangeScans.size(); pos_index++ )
-            {
-                CPose3D pose;
-                CVectorDouble v_coords;
-                v_3DRangeScans[pos_index].obs ->getSensorPose(pose);
-                pose.getAsVector(v_coords);
-                coord_x2.push_back(v_coords[0]);
-                coord_y2.push_back(v_coords[1]);
-            }
-            
-            win.plot(coord_x2,coord_y2,"g.8");
-            
-            win.waitForKey();
-            
+            visualizeResults();
         }
         
         cout << " done! See you soon!" << endl;

@@ -190,10 +190,12 @@ int loadParameters(int argc, char* argv[])
                 {
                     zUpperLimit = atof(argv[arg+1]);
                     arg += 2;
+                    cout << "  [INFO] Upper limit set to: " << zUpperLimit << endl;
                 }
                 else
                 {
                     cout << "  [Error] " << argv[arg] << " unknown paramter." << endl;
+                    showUsageInformation();
                     return -1;
                 }
             }

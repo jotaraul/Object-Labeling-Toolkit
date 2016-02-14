@@ -80,9 +80,22 @@ ADD_LIBRARY(DIFODO ${difodo_sources} ${difodo_headers} )
 # Tell CMake that the linker language is C++
 SET_TARGET_PROPERTIES(DIFODO PROPERTIES LINKER_LANGUAGE CXX)
 
-IF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
-	SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mtune=native -march=native")
-ENDIF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+# --------------------------------------------
+# Compilation flags
+# --------------------------------------------
+
+set(OLT_USING_OMPENMP "FALSE" CACHE BOOL
+  "Check if you want to parallelize some parts of the code using OpenMP.")
+
+IF (OLT_USING_OMPENMP)
+	IF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+		SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -O3 -mtune=native -march=native ")
+	ENDIF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+ELSE (OLT_USING_OMPENMP)
+	IF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+		SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -mtune=native -march=native ")
+	ENDIF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+ENDIF (OLT_USING_OMPENMP)
 
 
 # The debug post-fix of .dll /.so libs
