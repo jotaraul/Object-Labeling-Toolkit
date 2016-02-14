@@ -58,7 +58,11 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <pcl/registration/gicp.h>
+#include <pcl/registration/icp_nl.h>
 #include <pcl/registration/warp_point_rigid_3d.h>
+
+// NDT PCL
+#include <pcl/registration/ndt.h>
 
 // DIFODO
 #include <Difodo_multi_datasets.h>
@@ -107,7 +111,7 @@ string simpleMapFile;
 bool initialGuessICP2D  = true;
 bool initialGuessDifodo = false;
 bool initialGuessGICP   = false;
-bool refineWithICP3D    = false;
+bool refineLocalization = false;
 bool accumulatePast     = false;
 bool useKeyPoses        = false;
 bool smooth3DObs        = false;
@@ -120,7 +124,7 @@ size_t decimation       = 1;
 size_t decimateMemory   = 0;
 double scoreThreshold   = 0.0;
 
-string ICP3D_method;
+string refinationMethod;
 
 CPose3D lastGoodICP3Dpose;
 bool oneGoodICP3DPose = false;
@@ -175,10 +179,10 @@ struct TTime
 {
     float icp2D;
     float difodo;
-    float icp3D;
+    float refine;
     float smoothing;
     float overlapping;
-    TTime() : icp2D(0), difodo(0), icp3D(0), smoothing(0), overlapping(0)
+    TTime() : icp2D(0), difodo(0), refine(0), smoothing(0), overlapping(0)
     {}
 }time_measures;
 
@@ -200,6 +204,8 @@ void showUsageInformation()
             "    -enable_initialGuessGICP : Use GICP to get the initial guess." << endl <<
             "    -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
             "    -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
+            "    -enable_NDT    : Enable NDT to refine the RGBD-sensors location." << endl <<
+            "    -enable_ICPNL  : Enable ICP non linear to refine the RGBD-sensors location." << endl <<
             "    -enable_memory : Accumulate 3D point clouds already registered." << endl <<
             "    -enable_smoothing: Enable smoothing of the 3D point clouds." << endl <<
             "    -enable_keyPoses : Enable the use of key poses only." << endl <<
@@ -256,20 +262,32 @@ int loadParameters(int argc, char **argv)
         }
         else if ( !strcmp(argv[arg], "-enable_ICP3D") )
         {
-            refineWithICP3D = true;
-            ICP3D_method    = "ICP";  // MRPT
+            refineLocalization = true;
+            refinationMethod    = "ICP";  // MRPT
             cout << "  [INFO] Enabled ICP3D."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_GICP3D") )
         {
-            refineWithICP3D = true;
-            ICP3D_method     = "GICP"; // PCL
+            refineLocalization = true;
+            refinationMethod     = "GICP"; // PCL
             cout << "  [INFO] Enabled GICP3D."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_NDT") )
+        {
+            refineLocalization = true;
+            refinationMethod     = "NDT"; // PCL
+            cout << "  [INFO] Enabled NDT."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_ICPNL") )
+        {
+            refineLocalization = true;
+            refinationMethod     = "ICPNL"; // PCL
+            cout << "  [INFO] Enabled ICPNL."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_memory") )
         {
             accumulatePast   = true;
-            cout << "  [INFO] Enabled (G)ICP3D memory."  << endl;
+            cout << "  [INFO] Enabled refinement memory."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_keyPoses") )
         {
@@ -343,14 +361,18 @@ int loadParameters(int argc, char **argv)
     // Set the output rawlog name
     //
 
-    if ( refineWithICP3D && ICP3D_method == "GICP" )
+    if ( refineLocalization && refinationMethod == "GICP" )
         o_rawlogFileName += "_located-GICP";
-    else if ( refineWithICP3D && ICP3D_method == "ICP" )
+    else if ( refineLocalization && refinationMethod == "ICP" )
         o_rawlogFileName += "_located-ICP";
+    else if ( refineLocalization && refinationMethod == "ICPNL" )
+        o_rawlogFileName += "_located-ICPNL";
+    else if ( refineLocalization && refinationMethod == "NDT" )
+        o_rawlogFileName += "_located-NDT";
     else
         o_rawlogFileName += "_located";
 
-    if ( refineWithICP3D && accumulatePast )
+    if ( refineLocalization && accumulatePast )
         o_rawlogFileName += "-memory";
 
     if ( smooth3DObs )
@@ -370,7 +392,7 @@ void showPerformanceMeasurements()
 {
     TTimeStamp totalTime;
     TTimeParts totalTimeParts;
-    totalTime = secondsToTimestamp(time_measures.icp3D);
+    totalTime = secondsToTimestamp(time_measures.refine);
     timestampToParts(totalTime,totalTimeParts);
 
     cout << "  ---------------------------------------------------" << endl;
@@ -382,14 +404,14 @@ void showPerformanceMeasurements()
     cout << "    [INFO] time spent computing hulls     : " << time_measures.overlapping << " sec." << endl;
     cout << "    [INFO] time spent by the icp3D process: " ;
 
-    if ( time_measures.icp3D )
+    if ( time_measures.refine )
     {
-        cout << (int)totalTimeParts.hour << " hours " <<
-                (int)totalTimeParts.minute << " min. " <<
-                (int)totalTimeParts.second << " sec." << endl;
+        cout << (unsigned)totalTimeParts.hour << " hours " <<
+                (unsigned)totalTimeParts.minute << " min. " <<
+                (unsigned)totalTimeParts.second << " sec." << endl;
     }
     else
-        cout << time_measures.icp3D << " sec." << endl;
+        cout << time_measures.refine << " sec." << endl;
 
     cout << "---------------------------------------------------" << endl;
 }
@@ -1113,16 +1135,19 @@ void manuallyFixAlign( vector<T3DRangeScan> &v_obs,
     cout << "  [INFO] Final pose: " << estimated_pose << endl;
 }
 
+
 //-----------------------------------------------------------
 //
-//                   refineLocationGICP3D
+//              preparePointCloudsForRefinement
 //
 //-----------------------------------------------------------
 
-void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
-                           vector<T3DRangeScan> &v_obs2,
-                           CPose3D              &correction)
+void preparePointCloudsForRefinement(vector<T3DRangeScan> &v_obs,
+                                     vector<T3DRangeScan> &v_obs2,
+                                     PointCloud<PointXYZ>::Ptr cloud_old,
+                                     PointCloud<PointXYZ>::Ptr	cloud_new)
 {
+
     if (!initialGuessICP2D && !initialGuessDifodo)
     {
         for (size_t i=0; i < v_obs2.size(); i++)
@@ -1132,20 +1157,20 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
             v_obs2[i].obs->setSensorPose(pose);
         }
     }
-    
+
     // Show the scanned points:
     CSimplePointsMap	M1,M2;
     //M1.insertionOptions.minDistBetweenLaserPoints = 0.01;
     //M2.insertionOptions.minDistBetweenLaserPoints = 0.01;
-    
+
     CTicTac clock;
     clock.Tic();
 
     // Insert observations into a points map
-    
+
     for ( size_t i = 0; i < v_obs.size(); i++ )
     {
-        
+
         if ( !useOverlappingObs )
         {
             // Memory decimation?
@@ -1156,25 +1181,25 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
         {
             // Now check if this convex hull overlaps with the convex hull of the
             // new observations
-            
+
             size_t j = 0;
             bool insert = false;
             while ( !insert && ( j < v_obs2.size() ) )
             {
                 // Check overlapping
                 pcl::PointCloud<pcl::PointXYZ>::Ptr outputCloud(new pcl::PointCloud<pcl::PointXYZ>());
-                
+
                 // Point cloud new with old
                 pcl::CropHull<pcl::PointXYZ> cropHull;
                 cropHull.setInputCloud( v_obs2[j].convexHullCloud );
                 cropHull.setHullIndices( v_obs[i].polygons);
                 cropHull.setHullCloud( v_obs[i].convexHullCloud);
                 cropHull.setDim(3);
-                
+
                 std::vector<int> indices;
                 cropHull.filter(indices);
                 cropHull.filter(*outputCloud);
-                
+
                 if ( !outputCloud->size() ) // Exists overlap?
                 {
                     // Point cloud old with new. This is needed becouse we are
@@ -1183,57 +1208,82 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
                     cropHull.setHullIndices( v_obs2[j].polygons );
                     cropHull.setHullCloud( v_obs2[j].convexHullCloud );
                     cropHull.setDim(3);
-                    
+
                     cropHull.filter(indices);
                     cropHull.filter(*outputCloud);
-                    
+
                     if ( outputCloud->size() )
                         insert = true;
                 }
                 else
                     insert = true;
-                
+
                 j++;
             }
-            
+
             if ( insert )
                 M1.insertObservationPtr( v_obs[i].obs );
         }
-        
+
     }
-    
+
     for ( size_t i = 0; i < v_obs2.size(); i++ )
         M2.insertObservationPtr( v_obs2[i].obs );
-    
+
     cout << "    Time spent inserting points: " << clock.Tac() << " s." << endl;
-    
+
     cout << "    Getting points... points 1: ";
-    
+
     CVectorDouble xs, ys, zs, xs2, ys2, zs2;
     M1.getAllPoints(xs,ys,zs);
     M2.getAllPoints(xs2,ys2,zs2);
-    
+
     cout << xs.size() << " points 2: " << xs2.size() << " ... done" << endl;
-    
+
     //cout << "Inserting points...";
-    
-    PointCloud<PointXYZ>::Ptr	cloud_old   (new PointCloud<PointXYZ>());
-    PointCloud<PointXYZ>::Ptr	cloud_new   (new PointCloud<PointXYZ>());
-    PointCloud<PointXYZ>::Ptr   cloud_trans (new PointCloud<PointXYZ>());
-    
-    cloud_old->clear();
-    cloud_new->clear();
-    cloud_trans->clear();
-    
+
     for ( size_t i = 0; i < xs.size(); i+= ( ( accumulatePast ) ? 2 : 1) )
         cloud_old->push_back(PointXYZ(xs[i],ys[i],zs[i]));
-    
+
     for ( size_t i = 0; i < xs2.size(); i+= ( ( accumulatePast ) ? 1 : 1) )
         cloud_new->push_back(PointXYZ(xs2[i],ys2[i],zs2[i]));
-    
-    // Check if the cloud has points (GICP crashes if so)
+}
+
+//-----------------------------------------------------------
+//
+//                   getRGBDSensorIndex
+//
+//-----------------------------------------------------------
+
+size_t getRGBDSensorIndex( const string sensorLabel )
+{
+    for ( size_t i_sensor = 0; i_sensor < RGBD_sensors.size(); i_sensor++ )
+        if ( sensorLabel == RGBD_sensors[i_sensor] )
+            return i_sensor;
+}
+
+
+//-----------------------------------------------------------
+//
+//                   refineLocationGICP3D
+//
+//-----------------------------------------------------------
+
+void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
+                           vector<T3DRangeScan> &v_obs2,
+                           CPose3D              &correction)
+{
+    PointCloud<PointXYZ>::Ptr cloud_old   (new PointCloud<PointXYZ>());
+    PointCloud<PointXYZ>::Ptr cloud_new   (new PointCloud<PointXYZ>());
+
+    preparePointCloudsForRefinement(v_obs,v_obs2,cloud_old,cloud_new);
+
+    // Check if the cloud has points (crashes if so)
     if ( cloud_new->points.size() < 100 )
         return;
+
+    CTicTac clock;
+    PointCloud<PointXYZ>::Ptr   cloud_trans (new PointCloud<PointXYZ>());
     
     GeneralizedIterativeClosestPoint<PointXYZ, PointXYZ> gicp;
     
@@ -1292,14 +1342,162 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
 
 //-----------------------------------------------------------
 //
+//                   refineLocationICPNL
+//
+//-----------------------------------------------------------
+
+void refineLocationICPNL( vector<T3DRangeScan> &v_obs,
+                          vector<T3DRangeScan> &v_obs2,
+                          CPose3D              &correction)
+{
+    PointCloud<PointXYZ>::Ptr cloud_old   (new PointCloud<PointXYZ>());
+    PointCloud<PointXYZ>::Ptr cloud_new   (new PointCloud<PointXYZ>());
+
+    preparePointCloudsForRefinement(v_obs,v_obs2,cloud_old,cloud_new);
+
+    // Check if the cloud has points (crashes if so)
+    if ( cloud_new->points.size() < 100 )
+        return;
+
+    CTicTac clock;
+    PointCloud<PointXYZ>::Ptr   cloud_trans (new PointCloud<PointXYZ>());
+
+    IterativeClosestPointNonLinear<PointXYZ, PointXYZ> icpnl;
+
+    //cout << "Setting input clouds...";
+
+    icpnl.setInputSource(cloud_new);
+    icpnl.setInputTarget(cloud_old);
+
+    //cout << "done"  << endl;
+    //cout << "Setting parameters...";
+
+    //ICP options
+    icpnl.setMaxCorrespondenceDistance (0.2); // 0.5
+    // Set the maximum number of iterations (criterion 1)
+    icpnl.setMaximumIterations (20); // 10
+    // Set the transformation tras epsilon (criterion 2)
+    icpnl.setTransformationEpsilon (1e-5); // 1e-5
+
+
+    //cout << "done"  << endl;
+
+    cout << "    Doing ICPNL...";
+
+    clock.Tic();
+    icpnl.align(*cloud_trans);
+
+    double score;
+    score = icpnl.getFitnessScore(); // Returns the squared average error between the aligned input and target
+
+    v_goodness.push_back(score);
+
+    cout << " done! Average error: " << sqrt(score) << " meters" <<
+            " time spent: " << clock.Tac() << " s." << endl;
+
+    // Obtain the transformation that aligned cloud_source to cloud_source_registered
+    Eigen::Matrix4f transformation = icpnl.getFinalTransformation();
+
+    CMatrixDouble33 rot_matrix;
+    for (unsigned int i=0; i<3; i++)
+        for (unsigned int j=0; j<3; j++)
+            rot_matrix(i,j) = transformation(i,j);
+
+    correction.setRotationMatrix(rot_matrix);
+    correction.x(transformation(0,3));
+    correction.y(transformation(1,3));
+    correction.z(transformation(2,3));
+
+    if ( sqrt(score) > scoreThreshold && manuallyFix )
+        manuallyFixAlign( v_obs, v_obs2, correction );
+
+    if ( processBySensor )
+        cout << correction;
+}
+
+
+//-----------------------------------------------------------
+//
+//                   refineLocationNDT
+//
+//-----------------------------------------------------------
+
+void refineLocationNDT( vector<T3DRangeScan> &v_obs,
+                        vector<T3DRangeScan> &v_obs2,
+                        CPose3D              &correction)
+{
+    PointCloud<PointXYZ>::Ptr cloud_old   (new PointCloud<PointXYZ>());
+    PointCloud<PointXYZ>::Ptr cloud_new   (new PointCloud<PointXYZ>());
+
+    preparePointCloudsForRefinement(v_obs,v_obs2,cloud_old,cloud_new);
+
+    // Check if the cloud has points (crashes if so)
+    if ( cloud_new->points.size() < 100 )
+        return;
+
+    CTicTac clock;
+    PointCloud<PointXYZ>::Ptr   cloud_trans (new PointCloud<PointXYZ>());
+
+    // Initializing Normal Distributions Transform (NDT).
+    pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
+
+    // Setting scale dependent NDT parameters
+    // Setting minimum transformation difference for termination condition.
+    ndt.setTransformationEpsilon (0.01);
+    // Setting maximum step size for More-Thuente line search.
+    ndt.setStepSize (0.1);
+    //Setting Resolution of NDT grid structure (VoxelGridCovariance).
+    ndt.setResolution (0.2);
+
+    // Setting max number of registration iterations.
+    ndt.setMaximumIterations (35);
+
+    // Setting point cloud to be aligned.
+    ndt.setInputSource (cloud_new);
+    // Setting point cloud to be aligned to.
+    ndt.setInputTarget (cloud_old);
+
+    cout << "    Doing NDT...";
+
+    clock.Tic();
+    // Calculating required rigid transform to align the input cloud to the target cloud.
+    ndt.align (*cloud_trans);
+
+    std::cout << "    done! Normal Distributions Transform has converged:" << ndt.hasConverged ()
+              << "    score: " << ndt.getFitnessScore () << " time spent: " << clock.Tac() << endl;
+
+    // Obtain the transformation that aligned cloud_source to cloud_source_registered
+    Eigen::Matrix4f transformation = ndt.getFinalTransformation ();
+
+    CMatrixDouble33 rot_matrix;
+    for (unsigned int i=0; i<3; i++)
+        for (unsigned int j=0; j<3; j++)
+            rot_matrix(i,j) = transformation(i,j);
+
+    correction.setRotationMatrix(rot_matrix);
+    correction.x(transformation(0,3));
+    correction.y(transformation(1,3));
+    correction.z(transformation(2,3));
+
+    //if ( sqrt(score) > scoreThreshold && manuallyFix )
+    //    manuallyFixAlign( v_obs, v_obs2, correction );
+
+    if ( processBySensor )
+        cout << correction;
+}
+
+//-----------------------------------------------------------
+//
 //                      refineLocationICP3D
 //
 //-----------------------------------------------------------
 
-void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_obs2)
+void refineLocationICP3D( vector<T3DRangeScan> &v_obs,
+                          vector<T3DRangeScan> &v_obs2,
+                          CPose3D correction )
 {
     
-    if (!initialGuessICP2D)
+    if (!initialGuessICP2D && !initialGuessDifodo)
     {
         for (size_t i=0; i < v_obs2.size(); i++)
         {
@@ -1367,9 +1565,9 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_o
     
     CPose3D  mean = pdf->getMeanVal();
     
-    cout << "ICP run took " << run_time << " secs." << endl;
-    cout << "Goodness: " << 100*icp_info.goodness << "% , # of iterations= " << icp_info.nIterations << endl;
-    cout << "ICP output: mean= " << mean << endl;
+    cout << "    ICP run took " << run_time << " secs." << endl;
+    cout << "    Goodness: " << 100*icp_info.goodness << "% , # of iterations= " << icp_info.nIterations << endl;
+    cout << "    ICP output: mean= " << mean << endl;
     
     // Aligned maps:
     CSetOfObjectsPtr  PTNS2_ALIGN = CSetOfObjects::Create();
@@ -1415,34 +1613,12 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs, vector<T3DRangeScan> &v_o
             mean = CPose3D(0,0,0,0,0,0);
         
     }
-    
-    for ( size_t i = 0; i < v_obs2.size(); i++ )
-    {
-        CObservation3DRangeScanPtr obs = v_obs2[i].obs;
-        
-        CPose3D pose;
-        obs->getSensorPose( pose );
-        
-        CPose3D finalPose = mean + pose;
-        obs->setSensorPose(finalPose);
-    }
-    
+
     oneGoodICP3DPose = true;
     lastGoodICP3Dpose = mean;
+
+    correction = mean;
     
-}
-
-//-----------------------------------------------------------
-//
-//                   getRGBDSensorIndex
-//
-//-----------------------------------------------------------
-
-size_t getRGBDSensorIndex( const string sensorLabel )
-{
-    for ( size_t i_sensor = 0; i_sensor < RGBD_sensors.size(); i_sensor++ )
-        if ( sensorLabel == RGBD_sensors[i_sensor] )
-            return i_sensor;
 }
 
 
@@ -1452,7 +1628,7 @@ size_t getRGBDSensorIndex( const string sensorLabel )
 //
 //-----------------------------------------------------------
 
-void refineICP3D()
+void refine()
 {
 
     size_t N_sensors = RGBD_sensors.size();
@@ -1461,7 +1637,7 @@ void refineICP3D()
     if ( processBySensor )
     {
         cout << "  -------------------------------------------------" << endl;
-        cout << "       Getting relative position among devices " << ICP3D_method << endl;
+        cout << "       Getting relative position among devices " << refinationMethod << endl;
         cout << "  -------------------------------------------------" << endl;
 
         vector< vector <T3DRangeScan> > v_allObs(N_sensors);  // Past set of obs
@@ -1493,7 +1669,7 @@ void refineICP3D()
     {
 
         cout << "  -------------------------------------------------" << endl;
-        cout << "          Refining sensor poses using " << ICP3D_method << endl;
+        cout << "          Refining sensor poses using " << refinationMethod << endl;
         cout << "  -------------------------------------------------" << endl;
 
 
@@ -1613,58 +1789,43 @@ void refineICP3D()
                     //cout << i_sensor << "  " << v_isolatedObs[i_sensor][0].obs->sensorPose << endl;
                 }
 
-                if ( ICP3D_method == "GICP" )
+
+                if ( accumulatePast )
                 {
-                    if ( accumulatePast )
+                    if ( processInBlock )
                     {
-                        if ( processInBlock )
-                        {
-                            CPose3D correction;
-                            refineLocationGICP3D( v_obs, v_obsC, correction );
+                        CPose3D correction;
 
-                            for ( size_t i = 0; i < v_obsC.size(); i++ )
-                                v_obsC[i].obs->sensorPose =
-                                        correction + v_obsC[i].obs->sensorPose;
+                        if ( refinationMethod == "GICP" )
+                            refineLocationGICP3D( v_obs, v_obsC,correction );
+                        else if ( refinationMethod == "ICP")
+                            refineLocationICP3D( v_obs, v_obsC,correction );
+                        else if ( refinationMethod == "ICPNL")
+                            refineLocationICPNL( v_obs, v_obsC,correction );
+                        else if ( refinationMethod == "NDT")
+                            refineLocationNDT( v_obs, v_obsC,correction );
 
-                        }
-                        else
-                        {
-                            #pragma omp parallel for
+                        for ( size_t i = 0; i < v_obsC.size(); i++ )
+                            v_obsC[i].obs->sensorPose =
+                                    correction + v_obsC[i].obs->sensorPose;
 
-                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                            {
-                                CPose3D correction;
-                                refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor],correction );
-
-                                // Compose correction with initial guess
-                                CObservation3DRangeScanPtr obs = v_isolatedObs[i_sensor][0].obs;
-
-                                CPose3D pose;
-                                obs->getSensorPose( pose );
-
-                                CPose3D finalPose = correction + pose;
-                                obs->setSensorPose(finalPose);
-
-                                // Propagate the correction to the remaining obs to process
-                                for ( size_t i_obs = obsIndex+1; i_obs < N_scans; i_obs++ )
-                                {
-                                    if ( v_3DRangeScans[i_obs].obs->sensorLabel ==
-                                         RGBD_sensors[i_sensor] )
-                                    {
-                                        v_3DRangeScans[i_obs].obs->sensorPose =
-                                            correction + v_3DRangeScans[i_obs].obs->sensorPose;
-                                    }
-                                }
-
-                            }
-                        }
                     }
                     else
                     {
+#pragma omp parallel for
+
                         for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
                         {
                             CPose3D correction;
-                            refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor],correction );
+
+                            if ( refinationMethod == "GICP" )
+                                refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor],correction );
+                            else if ( refinationMethod == "ICP")
+                                refineLocationICP3D( v_obs, v_isolatedObs[i_sensor],correction );
+                            else if ( refinationMethod == "ICPNL")
+                                refineLocationICPNL( v_obs, v_isolatedObs[i_sensor],correction );
+                            else if ( refinationMethod == "NDT")
+                                refineLocationNDT( v_obs, v_isolatedObs[i_sensor],correction );
 
                             // Compose correction with initial guess
                             CObservation3DRangeScanPtr obs = v_isolatedObs[i_sensor][0].obs;
@@ -1682,25 +1843,49 @@ void refineICP3D()
                                      RGBD_sensors[i_sensor] )
                                 {
                                     v_3DRangeScans[i_obs].obs->sensorPose =
-                                    correction+v_3DRangeScans[i_obs].obs->sensorPose;
+                                            correction + v_3DRangeScans[i_obs].obs->sensorPose;
                                 }
                             }
 
                         }
                     }
                 }
-                else // ICP3D
+                else
                 {
-                    if ( accumulatePast )
+                    for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
                     {
-                        if ( processInBlock )
-                            refineLocationICP3D( v_obs, v_obsC );
-                        else
-                            for ( size_t i_sensor = 0; i_sensor < N_sensors; i_sensor++ )
-                                refineLocationICP3D( v_obs, v_isolatedObs[i_sensor]  );
+                        CPose3D correction;
+
+                        if ( refinationMethod == "GICP" )
+                            refineLocationGICP3D( v_obs, v_isolatedObs[i_sensor],correction );
+                        else if ( refinationMethod == "ICP")
+                            refineLocationICP3D( v_obs, v_isolatedObs[i_sensor],correction );
+                        else if ( refinationMethod == "ICPNL")
+                            refineLocationICPNL( v_obs, v_isolatedObs[i_sensor],correction );
+                        else if ( refinationMethod == "NDT")
+                            refineLocationNDT( v_obs, v_isolatedObs[i_sensor],correction );
+
+                        // Compose correction with initial guess
+                        CObservation3DRangeScanPtr obs = v_isolatedObs[i_sensor][0].obs;
+
+                        CPose3D pose;
+                        obs->getSensorPose( pose );
+
+                        CPose3D finalPose = correction + pose;
+                        obs->setSensorPose(finalPose);
+
+                        // Propagate the correction to the remaining obs to process
+                        for ( size_t i_obs = obsIndex+1; i_obs < N_scans; i_obs++ )
+                        {
+                            if ( v_3DRangeScans[i_obs].obs->sensorLabel ==
+                                 RGBD_sensors[i_sensor] )
+                            {
+                                v_3DRangeScans[i_obs].obs->sensorPose =
+                                        correction+v_3DRangeScans[i_obs].obs->sensorPose;
+                            }
+                        }
+
                     }
-                    else
-                        refineLocationICP3D( v_obs, v_obsC );
                 }
 
                 if ( accumulatePast )
@@ -2010,8 +2195,8 @@ int main(int argc, char **argv)
         
         //
         // Create the reference objects:
-        
-        if ( refineWithICP3D && ICP3D_method == "ICP" )
+
+        if ( refineLocalization && refinationMethod == "ICP" )
         {
             window = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: scene",500,500));
             window2 = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: UNALIGNED scans",500,500));
@@ -2064,13 +2249,13 @@ int main(int argc, char **argv)
         }
         
         //
-        // Refine using ICP3D
+        // Refine localization
 
-        if ( refineWithICP3D )
+        if ( refineLocalization )
         {
             clock.Tic();            
-            refineICP3D();
-            time_measures.icp3D = clock.Tac();
+            refine();
+            time_measures.refine = clock.Tac();
         }
         
         cout << "Mean goodness: "
