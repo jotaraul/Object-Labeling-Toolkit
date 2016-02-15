@@ -172,7 +172,7 @@ struct T3DRangeScan
 vector< TRobotPose >    v_robotPoses;
 vector< T3DRangeScan >  v_3DRangeScans;
 vector< CObservation3DRangeScanPtr > v_pending3DRangeScans;
-vector< double >    v_goodness;
+vector< double >    v_refinementGoodness;
 vector<string>      RGBD_sensors;
 
 struct TTime
@@ -650,8 +650,6 @@ void trajectoryICP2D( string &simpleMapFile,
 
         double score;
         score = gicp.getFitnessScore(); // Returns the squared average error between the aligned input and target
-
-        v_goodness.push_back(score);
 
         cout << " done! Average error: " << sqrt(score) << " meters" << endl;
         goodness = sqrt(score);
@@ -1314,7 +1312,7 @@ void refineLocationGICP3D( vector<T3DRangeScan> &v_obs,
     double score;
     score = gicp.getFitnessScore(); // Returns the squared average error between the aligned input and target
     
-    v_goodness.push_back(score);
+    v_refinementGoodness.push_back(score);
     
     cout << " done! Average error: " << sqrt(score) << " meters" <<
             " time spent: " << clock.Tac() << " s." << endl;
@@ -1390,7 +1388,7 @@ void refineLocationICPNL( vector<T3DRangeScan> &v_obs,
     double score;
     score = icpnl.getFitnessScore(); // Returns the squared average error between the aligned input and target
 
-    v_goodness.push_back(score);
+    v_refinementGoodness.push_back(score);
 
     cout << " done! Average error: " << sqrt(score) << " meters" <<
             " time spent: " << clock.Tac() << " s." << endl;
@@ -1463,8 +1461,11 @@ void refineLocationNDT( vector<T3DRangeScan> &v_obs,
     // Calculating required rigid transform to align the input cloud to the target cloud.
     ndt.align (*cloud_trans);
 
+    float score = ndt.getFitnessScore ();
+    v_refinementGoodness.push_back(score);
+
     std::cout << "    done! Normal Distributions Transform has converged:" << ndt.hasConverged ()
-              << "    score: " << ndt.getFitnessScore () << " time spent: " << clock.Tac() << endl;
+              << "    score: " << sqrt(score) << " time spent: " << clock.Tac() << endl;
 
     // Obtain the transformation that aligned cloud_source to cloud_source_registered
     Eigen::Matrix4f transformation = ndt.getFinalTransformation ();
@@ -1479,8 +1480,8 @@ void refineLocationNDT( vector<T3DRangeScan> &v_obs,
     correction.y(transformation(1,3));
     correction.z(transformation(2,3));
 
-    //if ( sqrt(score) > scoreThreshold && manuallyFix )
-    //    manuallyFixAlign( v_obs, v_obs2, correction );
+    if ( sqrt(score) > scoreThreshold && manuallyFix )
+        manuallyFixAlign( v_obs, v_obs2, correction );
 
     if ( processBySensor )
         cout << correction;
@@ -1601,23 +1602,13 @@ void refineLocationICP3D( vector<T3DRangeScan> &v_obs,
     //cout << "Press any key to exit..." << endl;
     //window->waitForKey();
     
-    double goodness = 100*icp_info.goodness;
-    v_goodness.push_back( goodness );
-    
-    if ( goodness < 96 )
-    {
-        //return;
-        if ( oneGoodICP3DPose )
-            mean = lastGoodICP3Dpose;
-        else
-            mean = CPose3D(0,0,0,0,0,0);
-        
-    }
-
-    oneGoodICP3DPose = true;
-    lastGoodICP3Dpose = mean;
+    double score = 100*icp_info.goodness;
+    v_refinementGoodness.push_back( score );
 
     correction = mean;
+
+    if ( sqrt(score) > scoreThreshold && manuallyFix )
+        manuallyFixAlign( v_obs, v_obs2, correction );
     
 }
 
@@ -1907,6 +1898,16 @@ void refine()
             }
         }
     }
+
+    cout << "  [INFO] Goodness mean : "
+         << std::accumulate(v_refinementGoodness.begin(), v_refinementGoodness.end(), 0.0 ) / v_refinementGoodness.size()
+         << endl
+         << "               maximum : " << *max_element( v_refinementGoodness.begin(), v_refinementGoodness.end() )
+         << endl
+         << "        minimum : " << *min_element( v_refinementGoodness.begin(), v_refinementGoodness.end() )
+         << endl;
+
+
 }
 
 
@@ -2257,10 +2258,6 @@ int main(int argc, char **argv)
             refine();
             time_measures.refine = clock.Tac();
         }
-        
-        cout << "Mean goodness: "
-             << std::accumulate(v_goodness.begin(), v_goodness.end(), 0.0 ) / v_goodness.size()
-             << endl;
         
         cout << " done." << endl;
         

@@ -70,6 +70,7 @@ bool setCalibrationParameters = true;
 int decimate = 0;
 bool keepOnlyProcessed = false;
 float removeEmptyObs = 0.0;
+float removeWeirdObs = 0.0;
 
 string replaceSensorLabel;  // Current sensor label
 string replaceSensorLabelAs;// New sensor label
@@ -124,6 +125,27 @@ struct TRGBD_Sensor{
 vector<TRGBD_Sensor> v_RGBD_sensors;  // Poses and labels of the RGBD devices in the robot
 
 vector<CPose3D> v_laser_sensorPoses; // Poses of the 2D laser scaners in the robot
+
+
+//-----------------------------------------------------------
+//
+//                    showUsageInformation
+//
+//-----------------------------------------------------------
+
+void showUsageInformation()
+{
+    cout << "  Usage information. At least one expected argument: " << endl <<
+            "    (1) Rawlog file." << endl;
+    cout << "  Then, optional parameters:" << endl <<
+            "    -config        : Configuration file." << endl <<
+            "    -h             : Shows this help." << endl <<
+            "    -only_hokuyo   : Process only hokuyo observations." << endl <<
+            "    -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
+            "    -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
+            "    -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
+            "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl << endl;
+}
 
 
 //-----------------------------------------------------------
@@ -366,25 +388,12 @@ void equalizeCLAHE( CObservation3DRangeScanPtr obs3D )
 
 }
 
-//-----------------------------------------------------------
-//
-//                    showUsageInformation
-//
-//-----------------------------------------------------------
 
-void showUsageInformation()
-{
-    cout << "  Usage information. At least one expected argument: " << endl <<
-            "    (1) Rawlog file." << endl;
-    cout << "  Then, optional parameters:" << endl <<
-            "    -config        : Configuration file." << endl <<
-            "    -h             : Shows this help." << endl <<
-            "    -only_hokuyo   : Process only hokuyo observations." << endl <<
-            "    -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
-            "    -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
-            "    -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
-            "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl << endl;
-}
+//-----------------------------------------------------------
+//
+//                        decimateRawlog
+//
+//-----------------------------------------------------------
 
 void decimateRawlog()
 {
@@ -891,6 +900,13 @@ int loadParameters(int argc, char* argv[])
                      << removeEmptyObs << endl;
                 arg++;
             }
+            else if ( !strcmp(argv[arg],"-removeWeirdObs") )
+            {
+                removeWeirdObs = atof(argv[arg+1]);;
+                cout << "  [INFO] Setting to 0 (null) observations with a factor of valid measuremets lower than "
+                     << removeWeirdObs << endl;
+                arg++;
+            }
             else if ( !strcmp(argv[arg],"-replaceLabel") )
             {
                 replaceSensorLabel = argv[arg+1];
@@ -1028,6 +1044,114 @@ void removeEmptyObservations()
 
 //-----------------------------------------------------------
 //
+//                   removeWeirdObservations
+//
+//-----------------------------------------------------------
+
+void removeWeirdObservations()
+{
+    //
+    // Check input rawlog
+    //
+
+    if (!mrpt::system::fileExists(i_rawlogFilename))
+    {
+        cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
+        cerr << " doesn't exist." << endl;
+        return;
+    }
+
+    CFileGZInputStream i_rawlog(i_rawlogFilename);
+
+    cout << "  [INFO] Processing rawlog " << i_rawlogFilename << endl;
+
+    string o_rawlogFileName;
+
+    //
+    // Set output rawlog file
+    //
+
+    o_rawlogFileName.assign(i_rawlogFilename.begin(),
+                            i_rawlogFilename.end()-7);
+    o_rawlogFileName += (calibConfig.only2DLaser) ? "_hokuyo" : "";
+    o_rawlogFileName += (calibConfig.onlyRGBD) ? "_rgbd" : "";
+    o_rawlogFileName += "_processed.rawlog";
+
+    CFileGZOutputStream o_rawlog(o_rawlogFileName);
+
+    //
+    // Process rawlog
+    //
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+    size_t obsSet = 0;
+
+    cout << "    Process: ";
+    cout.flush();
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+    {
+        // Show progress as dots
+
+        if ( !(obsIndex % 200) )
+        {
+            if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
+            cout.flush();
+        }
+
+        if (IS_CLASS(obs, CObservation3DRangeScan))
+        {
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            int rows = obs3D->rangeImage.rows();
+            int cols = obs3D->rangeImage.cols();
+
+            int validMeasurements = 0;
+
+            for ( int r = 0; r < rows; r++ )
+                for ( int c = 0; c < cols; c++ )
+                    if ( obs3D->rangeImage(r,c) )
+                        validMeasurements++;
+
+            float factor = validMeasurements / (float)(rows*cols);
+
+            cout << "Index [" << obsIndex-1 << "] valids " << validMeasurements
+                 << " of " << (float)(rows*cols) << " factor " << factor;
+
+            if ( factor > removeWeirdObs )
+                o_rawlog << obs3D;
+            else
+            {
+                for ( int r = 0; r < rows; r++ )
+                    for ( int c = 0; c < cols; c++ )
+                        obs3D->rangeImage(r,c) = 0;
+
+                obs3D->project3DPointsFromDepthImage();
+                o_rawlog << obs3D;
+
+                cout << " set to 0!";
+                obsSet++;
+            }
+
+            cout << endl;
+        }
+
+
+    }
+
+    cout << endl << "    Number of observations set to 0 (null): "
+         << obsSet << " of " << obsIndex << endl;
+
+    cout << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl << endl;
+}
+
+
+//-----------------------------------------------------------
+//
 //                          main
 //
 //-----------------------------------------------------------
@@ -1092,6 +1216,9 @@ int main(int argc, char* argv[])
 
         else if ( removeEmptyObs )
             removeEmptyObservations();
+
+        else if ( removeWeirdObs )
+            removeWeirdObservations();
 
         else if ( setCalibrationParameters )
             processRawlog();
