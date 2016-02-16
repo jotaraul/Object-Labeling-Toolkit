@@ -72,6 +72,7 @@ size_t N_lowerLimitOfObs = 0;
 size_t decimate = 0;
 float distBetweenPoints = 0.02;
 float pointSize = 3;
+bool equalizeRGBDHist = false;
 
 //-----------------------------------------------------------
 //
@@ -90,11 +91,13 @@ void showUsageInformation()
             "    -pointSize <num>       : Size of the points for visualization purposes."  << endl <<
             "    -distBetweenPoints <num>: Min distance between two points to insert the second one." << endl <<
             "    -step                  : Enable step by step execution." << endl <<
+            "    -equalizeRGBDHist      : Enable the equalization of the RGB images." << endl <<
             "    -clear                 : Clear the scene after a step." << endl <<
             "    -poses                 : Show spheres in the scene representing observation poses." << endl <<
             "    -zUpperLimit           : Remove points with a height higher than this paramter." << endl <<
             "    -limit                 : Sets a limit to the number of obs to process." << endl <<
             "    -lowerLimit            : Sets a lower limit to the number of obs to process." << endl << endl;
+
 }
 
 
@@ -144,6 +147,13 @@ int loadParameters(int argc, char* argv[])
 
                     cout << "  [INFO] Employing only 1 of each " << decimate << " obs" << endl;
                 }
+                else if ( !strcmp(argv[arg],"-equalizeRGBDHist") )
+                {
+                    equalizeRGBDHist = true;
+
+                    cout << "  [INFO] Equalizing RGB images" << endl;
+                }
+
                 else if ( !strcmp(argv[arg],"-pointSize") )
                 {
                     pointSize = atof(argv[arg+1]);
@@ -317,6 +327,9 @@ void visualizeScene()
 
         CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
         obs3D->load();
+
+        if (equalizeRGBDHist)
+            obs3D->intensityImage.equalizeHistInPlace();
 
         CPose3D pose;
         obs3D->getSensorPose( pose );
