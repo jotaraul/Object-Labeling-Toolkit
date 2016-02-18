@@ -64,7 +64,7 @@ void getImages( CVideoFileWriter &vid, string &i_rawlogFileName,
     if ( !mrpt::system::fileExists(i_rawlogFileName) )
         return;
 
-    cout << "Working with " << i_rawlogFileName;
+    cout << "    Working with " << i_rawlogFileName;
     cout.flush();
 
     CImage lastImg;
@@ -209,7 +209,7 @@ void getImages( CVideoFileWriter &vid, string &i_rawlogFileName,
     for ( size_t i = 0; i < 8; i++ )
         vid << lastImg;
 
-    cout << " DONE!" << endl;
+    cout << "   DONE!" << endl;
 
 }
 
@@ -219,13 +219,19 @@ void getImages( CVideoFileWriter &vid, string &i_rawlogFileName,
 
 int main(int argc, char **argv)
 {
+
+    cout << endl << "-----------------------------------------------------" << endl;
+    cout <<         "                Create video app.                    " << endl;
+    cout <<         "            [Object Labeling Tookit]                 " << endl;
+    cout <<         "-----------------------------------------------------" << endl << endl;
+
     try
     {
 
         string i_rawlogFile;
         string o_videoFile;
 
-        int fps = 4;
+        int fps = 10;
 
         bool batchMode;
 
@@ -245,28 +251,9 @@ int main(int argc, char **argv)
         v_typesOfRooms.push_back("kitchen");
         v_typesOfRooms.push_back("livingroom");
         v_typesOfRooms.push_back("masterroom");
+        v_typesOfRooms.push_back("livingroomkitchen");
 
         vector<string> v_sequences;
-
-        for ( size_t i = 0; i < v_typesOfRooms.size(); i++ )
-        {
-            std::stringstream ss;
-            ss << v_typesOfRooms[i];
-
-            bool dirExists = true;
-            size_t j = 1;
-
-            while (dirExists)
-            {
-                ss << j;
-                string dir = ss.str();
-
-                if ( mrpt::system::directoryExists(dir) )
-                    v_sequences.push_back(dir);
-                else
-                    dirExists = false;
-            }
-        }
 
         v_sensorsToUse.resize(4,true);
 
@@ -342,6 +329,7 @@ int main(int argc, char **argv)
                     " \t (1) Input rawlog file / path of the dataset in the system." << endl <<
                     " \t (2) Output video file." << endl;
             cout << "Then, optional parameters:" << endl <<
+                    " \t -fps         : Frames per second of the output video." << endl <<
                     " \t -sensor      : Use information from this sensor." << endl <<
                     " \t -useDepthImg : Use depth images instead of RGB." << endl <<
                     " \t -batchMode   : Create a video with all the sequences into the dataset." << endl <<
@@ -350,9 +338,43 @@ int main(int argc, char **argv)
         }
 
         if ( useDepthImg )
-            cout << "[INFO] Using depth image." << endl;
+            cout << "  [INFO] Using depth image." << endl;
         if ( batchMode )
-            cout << "[INFO] Using batch mode." << endl;
+        {
+            cout << "  [INFO] Using batch mode." << endl;
+
+            for ( size_t i = 0; i < v_typesOfRooms.size(); i++ )
+            {
+                std::stringstream ss;
+                ss << datasetPath << v_typesOfRooms[i];
+
+                bool dirExists = true;
+                size_t j = 1;
+
+                while (dirExists)
+                {
+                    std::stringstream ss2;
+                    ss2 << ss.str() << j;
+
+                    string dir = ss2.str();
+
+                    if ( mrpt::system::directoryExists(dir) )
+                    {
+                        std::stringstream  s3;
+                        s3 << v_typesOfRooms[i] << j;
+                        v_sequences.push_back(s3.str());
+                        cout << "    " << dir << " exists" << endl;
+                    }
+                    else
+                    {
+                        dirExists = false;
+                        cout << "    " << dir << " doesn't exist" << endl;
+                    }
+
+                    j++;
+                }
+            }
+        }
 
         size_t N_sensors = v_sensorsToUse[0] + v_sensorsToUse[1]
                             + v_sensorsToUse[2] + v_sensorsToUse[3];
@@ -375,7 +397,7 @@ int main(int argc, char **argv)
 
         if ( !vid.isOpen() )
         {
-            cout << "[ERROR] Opening video file." << endl;
+            cout << "  [ERROR] Opening video file." << endl;
             return -1;
         }
 
@@ -398,13 +420,11 @@ int main(int argc, char **argv)
                 for ( size_t sequece_index = 0; sequece_index < v_sequences.size(); sequece_index++ )
                     for ( size_t rawlog_index = 1; rawlog_index < 4; rawlog_index++ )
                     {
-                        CRawlog i_rawlog;
 
                         std::stringstream ss;
                         ss << rawlog_index;
                         string i_rawlogFileName = datasetPath+"/"+v_sessions[session_index]+"/"+v_sequences[sequece_index]+"/"+ss.str()+".rawlog";
                         string textToAdd = v_sessions[session_index]+" / "+v_sequences[sequece_index] + " / " + ss.str();
-
 
                         getImages( vid, i_rawlogFileName,
                                    imgWidth, width,
@@ -413,10 +433,9 @@ int main(int argc, char **argv)
                     }
         }
 
-
-
-
         vid.close();
+
+        cout << "  [INFO] Video completed!" << endl;
 
         return 0;
 

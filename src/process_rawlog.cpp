@@ -85,10 +85,11 @@ struct TCalibrationConfig{
     bool scaleDepthInfo;
     int  equalizeRGBHistograms;
     double truncateDepthInfo;
+    bool project3DPointClouds;
 
     TCalibrationConfig() : only2DLaser(false),
         onlyRGBD(false), useDefaultIntrinsics(true), equalizeRGBHistograms(false),
-        truncateDepthInfo(0)
+        truncateDepthInfo(0), project3DPointClouds(false)
     {}
 
 } calibConfig;
@@ -142,6 +143,7 @@ void showUsageInformation()
             "    -h             : Shows this help." << endl <<
             "    -only_hokuyo   : Process only hokuyo observations." << endl <<
             "    -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
+            "    -project3DPointClouds: Project 3D point clouds from depth images." << endl <<
             "    -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
             "    -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
             "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl << endl;
@@ -216,6 +218,8 @@ void loadConfig()
         calibConfig.truncateDepthInfo     = config.read_double("CALIBRATION","truncate_depth_info",0,true);
         calibConfig.applyCLAMS            = config.read_bool("CALIBRATION","apply_CLAMS_Calibration_if_available",false,true);
         calibConfig.scaleDepthInfo        = config.read_bool("CALIBRATION","scale_depth_info",false,true);
+        calibConfig.project3DPointClouds  = config.read_bool("CALIBRATION","project_3D_point_clouds",false,true);
+
 
         //
         // Load 2D laser scanners info
@@ -742,7 +746,14 @@ void processRawlog()
                 }
 
                 // Project 3D points from the depth image
-                obs3D->project3DPointsFromDepthImage();
+                if ( calibConfig.project3DPointClouds )
+                    obs3D->project3DPointsFromDepthImage();
+
+                obs3D->points3D_x.clear();
+                obs3D->points3D_y.clear();
+                obs3D->points3D_z.clear();
+
+                obs3D->hasPoints3D = false;
 
                 // Equalize histogram of RGB images?
                 if ( calibConfig.equalizeRGBHistograms == 1 )

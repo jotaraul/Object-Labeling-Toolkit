@@ -134,8 +134,8 @@ double scoreThreshold   = 0.0;
 
 string refinationMethod;
 
-CPose3D lastGoodICP3Dpose;
-bool oneGoodICP3DPose = false;
+CPose3D lastGoodICPpose;
+bool oneGoodICPPose = false;
 
 bool skip_window=false;
 //int  ICP_method = (int) icpClassic;
@@ -210,8 +210,8 @@ void showUsageInformation()
             "    -h             : Show this help." << endl <<
             "    -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
             "    -enable_initialGuessGICP : Use GICP to get the initial guess." << endl <<
-            "    -enable_ICP3D  : Enable ICP3D to refine the RGBD-sensors location." << endl <<
-            "    -enable_GICP3D : Enable GICP3D to refine the RGBD-sensors location." << endl <<
+            "    -enable_ICP    : Enable ICP to refine the RGBD-sensors location." << endl <<
+            "    -enable_GICP   : Enable GICP to refine the RGBD-sensors location." << endl <<
             "    -enable_NDT    : Enable NDT to refine the RGBD-sensors location." << endl <<
             "    -enable_ICPNL  : Enable ICP non linear to refine the RGBD-sensors location." << endl <<
             "    -enable_ICPWN  : Enable ICP with normals to refine the RGBD-sensors location." << endl <<
@@ -271,17 +271,17 @@ int loadParameters(int argc, char **argv)
             initialGuessGICP = true;
             cout << "  [INFO] Enabled GICP for the computation of the initial guess."  << endl;
         }
-        else if ( !strcmp(argv[arg], "-enable_ICP3D") )
+        else if ( !strcmp(argv[arg], "-enable_ICP") )
         {
             refineLocalization = true;
             refinationMethod    = "ICP";  // MRPT
-            cout << "  [INFO] Enabled ICP3D."  << endl;
+            cout << "  [INFO] Enabled ICP."  << endl;
         }
-        else if ( !strcmp(argv[arg], "-enable_GICP3D") )
+        else if ( !strcmp(argv[arg], "-enable_GICP") )
         {
             refineLocalization = true;
             refinationMethod     = "GICP"; // PCL
-            cout << "  [INFO] Enabled GICP3D."  << endl;
+            cout << "  [INFO] Enabled GICP."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_NDT") )
         {
@@ -1309,7 +1309,7 @@ void addNormal(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud,
 
 //-----------------------------------------------------------
 //
-//                   refineLocationGICP3D
+//                   refineLocationGICP
 //
 //-----------------------------------------------------------
 
@@ -1388,7 +1388,7 @@ void refineLocationGICP( vector<T3DRangeScan> &v_obs,
 
 //-----------------------------------------------------------
 //
-//                   refineLocationGICP3D
+//                   refineLocationGICPWN
 //
 //-----------------------------------------------------------
 
@@ -1835,7 +1835,7 @@ void refineLocationICPMRPT( vector<T3DRangeScan> &v_obs,
 
 //-----------------------------------------------------------
 //
-//                       refineICP3D
+//                       refine
 //
 //-----------------------------------------------------------
 
