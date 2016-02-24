@@ -88,7 +88,7 @@ void showUsageInformation()
     cout << "  Then, optional parameters:" << endl <<
             "    -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
             "    -decimate <num>        : Visualize one of each <num> RGBD observations."  << endl <<
-            "    -pointSize <num>       : Size of the points for visualization purposes."  << endl <<
+            "    -pointSize <num>       : Size of the points for visualization purposes (default 3)."  << endl <<
             "    -distBetweenPoints <num>: Min distance between two points to insert the second one." << endl <<
             "    -step                  : Enable step by step execution." << endl <<
             "    -equalizeRGBDHist      : Enable the equalization of the RGB images." << endl <<
@@ -152,6 +152,7 @@ int loadParameters(int argc, char* argv[])
                     equalizeRGBDHist = true;
 
                     cout << "  [INFO] Equalizing RGB images" << endl;
+                    arg++;
                 }
 
                 else if ( !strcmp(argv[arg],"-pointSize") )
@@ -327,6 +328,9 @@ void visualizeScene()
 
         CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
         obs3D->load();
+
+        if ( !obs3D->hasPoints3D )
+            obs3D->project3DPointsFromDepthImage();
 
         if (equalizeRGBDHist)
             obs3D->intensityImage.equalizeHistInPlace();

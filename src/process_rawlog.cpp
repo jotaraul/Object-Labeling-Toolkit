@@ -86,10 +86,11 @@ struct TCalibrationConfig{
     int  equalizeRGBHistograms;
     double truncateDepthInfo;
     bool project3DPointClouds;
+    bool remove3DPointClouds;
 
     TCalibrationConfig() : only2DLaser(false),
         onlyRGBD(false), useDefaultIntrinsics(true), equalizeRGBHistograms(false),
-        truncateDepthInfo(0), project3DPointClouds(false)
+        truncateDepthInfo(0), project3DPointClouds(false), remove3DPointClouds(false)
     {}
 
 } calibConfig;
@@ -145,6 +146,7 @@ void showUsageInformation()
             "    -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
             "    -project3DPointClouds: Project 3D point clouds from depth images." << endl <<
             "    -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
+            "    -removeWeirdObs <num> : Set to 0 (null) observations with a factor of valid measurements lower than <num>" << endl <<
             "    -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
             "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl << endl;
 }
@@ -219,6 +221,7 @@ void loadConfig()
         calibConfig.applyCLAMS            = config.read_bool("CALIBRATION","apply_CLAMS_Calibration_if_available",false,true);
         calibConfig.scaleDepthInfo        = config.read_bool("CALIBRATION","scale_depth_info",false,true);
         calibConfig.project3DPointClouds  = config.read_bool("CALIBRATION","project_3D_point_clouds",false,true);
+        calibConfig.remove3DPointClouds  = config.read_bool("CALIBRATION","remove_3D_point_clouds",false,true);
 
 
         //
@@ -568,7 +571,7 @@ void processRawlog()
     else
         cout << "on (from " << calibConfig.truncateDepthInfo << "m)" << endl;
 
-    cout << "  [INFO] Scaling depth info          : ";
+    cout << "  [INFO] Scaling depth info          : ";    
 
     if ( !calibConfig.scaleDepthInfo )
         cout << "off" << endl;
@@ -585,6 +588,20 @@ void processRawlog()
 #endif
     else
         cout << "off" << endl;
+
+    cout << "  [INFO] Projecting 3D point clouds  : ";
+
+    if ( !calibConfig.project3DPointClouds )
+        cout << "off" << endl;
+    else
+        cout << "on" << endl;
+
+    cout << "  [INFO] Removing 3D point clouds    : ";
+
+    if ( !calibConfig.remove3DPointClouds )
+        cout << "off" << endl;
+    else
+        cout << "on" << endl;
 
     string o_rawlogFileName;
 
@@ -671,7 +688,6 @@ void processRawlog()
                     if ( sensor.loadIntrinsicParameters )
                     {
                         CConfigFile config( configFileName );
-
                         obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_depth",config);
                         obs3D->cameraParams.loadFromConfigFile(sensor.sensorLabel + "_intensity",config);
                     }
@@ -682,6 +698,10 @@ void processRawlog()
                     }
 
                 }
+
+                // Set the relative pose as pure rotation. For more info. see:
+                // http://reference.mrpt.org/stable/classmrpt_1_1obs_1_1_c_observation3_d_range_scan.html
+                obs3D->relativePoseIntensityWRTDepth = CPose3D(0,0,0,DEG2RAD(-90),0,DEG2RAD(-90));
 
                 // Apply depth intrinsic calibration?
 #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
@@ -745,15 +765,17 @@ void processRawlog()
                                 obs3D->rangeImage(row,col) = 0;
                 }
 
-                // Project 3D points from the depth image
-                if ( calibConfig.project3DPointClouds )
+                // Project 3D points from the depth image or remove them if present
+                if ( calibConfig.project3DPointClouds && !calibConfig.remove3DPointClouds )
                     obs3D->project3DPointsFromDepthImage();
+                else if ( calibConfig.remove3DPointClouds )
+                {
+                    obs3D->points3D_x.clear();
+                    obs3D->points3D_y.clear();
+                    obs3D->points3D_z.clear();
 
-                obs3D->points3D_x.clear();
-                obs3D->points3D_y.clear();
-                obs3D->points3D_z.clear();
-
-                obs3D->hasPoints3D = false;
+                    obs3D->hasPoints3D = false;
+                }
 
                 // Equalize histogram of RGB images?
                 if ( calibConfig.equalizeRGBHistograms == 1 )
@@ -1130,8 +1152,8 @@ void removeWeirdObservations()
 
             float factor = validMeasurements / (float)(rows*cols);
 
-            cout << "Index [" << obsIndex-1 << "] valids " << validMeasurements
-                 << " of " << (float)(rows*cols) << " factor " << factor;
+            //cout << "Index [" << obsIndex-1 << "] valids " << validMeasurements
+            //     << " of " << (float)(rows*cols) << " factor " << factor;
 
             if ( factor > removeWeirdObs )
                 o_rawlog << obs3D;
@@ -1144,11 +1166,11 @@ void removeWeirdObservations()
                 obs3D->project3DPointsFromDepthImage();
                 o_rawlog << obs3D;
 
-                cout << " set to 0!";
+                //cout << " set to 0!";
                 obsSet++;
             }
 
-            cout << endl;
+            //cout << endl;
         }
 
 

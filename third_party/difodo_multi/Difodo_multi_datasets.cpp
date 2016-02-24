@@ -60,13 +60,12 @@ void CDifodoDatasets::loadConfiguration(unsigned int &i_rows, unsigned int &i_co
 
     cams_oder = cameras_order;
 
-    for ( int c = 1; c <= NC; c++ )
+    for ( int c = 0; c < NC; c++ )
     {
-        cam_pose[c-1] = v_poses[cameras_order[c-1]-1];
+        cam_pose[c] = v_poses[c];
         CMatrixDouble44 homoMatrix;
-        cam_pose[c-1].getHomogeneousMatrix(homoMatrix);
-        calib_mat[c-1] = (CMatrixFloat44)homoMatrix.inverse();
-
+        cam_pose[c].getHomogeneousMatrix(homoMatrix);
+        calib_mat[c] = (CMatrixFloat44)homoMatrix.inverse();
     }
 
 	//						Open Rawlog File

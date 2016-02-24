@@ -52,6 +52,7 @@
 #include <mrpt/opengl/CAngularObservationMesh.h>
 #include <mrpt/opengl/CDisk.h>
 #include <mrpt/opengl/stock_objects.h>
+#include <mrpt/opengl/CFrustum.h>
 
 // ICP 3D PCL
 
@@ -384,18 +385,23 @@ int loadParameters(int argc, char **argv)
     // Set the output rawlog name
     //
 
-    if ( refineLocalization && refinationMethod == "GICP" )
-        o_rawlogFileName += "_located-GICP";
-    else if ( refineLocalization && refinationMethod == "ICP" )
-        o_rawlogFileName += "_located-ICP";
-    else if ( refineLocalization && refinationMethod == "ICPNL" )
-        o_rawlogFileName += "_located-ICPNL";
-    else if ( refineLocalization && refinationMethod == "ICPWN" )
-        o_rawlogFileName += "_located-ICPWN";
-    else if ( refineLocalization && refinationMethod == "NDT" )
-        o_rawlogFileName += "_located-NDT";
+    if ( initialGuessICP2D )
+        o_rawlogFileName += "_located-ICP2D";
+    else if ( initialGuessDifodo )
+        o_rawlogFileName += "_located-DIFODO";
     else
         o_rawlogFileName += "_located";
+
+    if ( refineLocalization && refinationMethod == "GICP" )
+        o_rawlogFileName += "-GICP";
+    else if ( refineLocalization && refinationMethod == "ICP" )
+        o_rawlogFileName += "-ICP";
+    else if ( refineLocalization && refinationMethod == "ICPNL" )
+        o_rawlogFileName += "-ICPNL";
+    else if ( refineLocalization && refinationMethod == "ICPWN" )
+        o_rawlogFileName += "-ICPWN";
+    else if ( refineLocalization && refinationMethod == "NDT" )
+        o_rawlogFileName += "-NDT";
 
     if ( refineLocalization && accumulatePast )
         o_rawlogFileName += "-memory";
@@ -898,8 +904,8 @@ void manuallyFixAlign( vector<T3DRangeScan> &v_obs,
                        vector<T3DRangeScan> &v_obs2,
                        CPose3D &estimated_pose )
 {
-    cout << "  [INFO] Manually fixing. Initial pose: " << estimated_pose << endl;
-    
+    cout << "  [INFO] Manually fixing. Initial pose transf: " << estimated_pose << endl;
+
     TPose3D pose;
     
     double OFFSET = 0.1;
@@ -951,6 +957,17 @@ void manuallyFixAlign( vector<T3DRangeScan> &v_obs,
         }
         
         CObservation3DRangeScanPtr obs3D = v_obs2[obs_index].obs;
+
+        cout << "    Initial pose:                              " << obs3D->sensorPose << endl;
+
+        //Frustum
+        float fovh = M_PI*62.5/180.0;	//Larger FOV because depth is registered with color
+        float fovv = M_PI*48.5/180.0;
+
+        opengl::CFrustumPtr FOV = opengl::CFrustum::Create(0.3, 2, 57.3*fovh, 57.3*fovv, 1.f, true, false);
+        FOV->setColor(0.7,0.7,0.7);
+        FOV->setPose(obs3D->sensorPose);
+        scene->insert( FOV );
         
         if ( !processInBlock )
             colouredMap.loadFromRangeScan( *obs3D );
@@ -1464,7 +1481,7 @@ void refineLocationICPWN( vector<T3DRangeScan> &v_obs,
     correction.z(transformation(2,3));
 
     if (( sqrt(score) > scoreThreshold && manuallyFix )
-            || ( converged && manuallyFix ) )
+            || ( !converged && manuallyFix ) )
         manuallyFixAlign( v_obs, v_obs2, correction );
 
     if ( processBySensor )
@@ -1622,7 +1639,7 @@ void refineLocationNDT( vector<T3DRangeScan> &v_obs,
     correction.z(transformation(2,3));
 
     if (( sqrt(score) > scoreThreshold && manuallyFix )
-            || ( converged && manuallyFix ) )
+            || ( !converged && manuallyFix ) )
         manuallyFixAlign( v_obs, v_obs2, correction );
 
     if ( processBySensor )
@@ -1857,6 +1874,7 @@ void refine()
         {
             T3DRangeScan obs = v_3DRangeScans[obsIndex];
             size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
+            obs.obs->project3DPointsFromDepthImage(false);
             v_allObs[sensorIndex].push_back(obs);
         }
 
@@ -1907,6 +1925,9 @@ void refine()
 
             size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
 
+            if ( !obs.obs->hasPoints3D )
+                obs.obs->project3DPointsFromDepthImage();
+
             v_obsC[sensorIndex]       = obs;
             v_obs_loaded[sensorIndex] = true;
             v_obsC_indices[sensorIndex] = obsIndex;
@@ -1934,14 +1955,27 @@ void refine()
 
                     if ( manuallyFix )
                     {
-                        vector<T3DRangeScan> v_aligned;
-                        v_aligned.push_back(v_obs[0]);
-                        CObservation3DRangeScan obs3D;
+                        // TODO: Load this from config to do it more general
+                        // Sensors order:
+                        vector<string> v_RGBDs_order(4);
+                        v_RGBDs_order[0] = "RGBD_4";
+                        v_RGBDs_order[1] = "RGBD_3";
+                        v_RGBDs_order[2] = "RGBD_1";
+                        v_RGBDs_order[3] = "RGBD_2";
+
+                        vector<T3DRangeScan> v_aligned;                        
+
+                        v_aligned.push_back(v_obs[getRGBDSensorIndex(v_RGBDs_order[0])]);
+
                         TTimeStamp t1 = v_obs[0].obs->timestamp;
 
-                        for ( size_t i_sensor = 1; i_sensor < N_sensors; i_sensor++ )
+                        for ( size_t i = 1; i < N_sensors; i++ )
                         {
-                            cout << "    Time diff: " << timeDifference(t1,v_obs[i_sensor].obs->timestamp) << endl;
+                            size_t i_sensor = getRGBDSensorIndex(v_RGBDs_order[i]);
+                            cout << "    Time diff: " << timeDifference(t1,
+                                     v_obs[getRGBDSensorIndex(v_RGBDs_order[i_sensor])].obs->timestamp)
+                                 << endl;
+
                             CPose3D estimated_pose;
                             //v_obs[i_sensor].obs->getSensorPose(estimated_pose);
 
@@ -1955,7 +1989,24 @@ void refine()
                             CPose3D finalPose = estimated_pose + pose;
                             v_obs[i_sensor].obs->setSensorPose(finalPose);
 
+                            cout << "    Pose of " << v_RGBDs_order[i] <<
+                                    " " << v_obs[i_sensor].obs->sensorPose << endl;
+
                             v_aligned.push_back( v_obs[i_sensor] );
+
+                            // Propagate the correction to the remaining obs to process
+                            if ( propagateCorrections )
+                            {
+                                for ( size_t i_obs = obsIndex+1; i_obs < N_scans; i_obs++ )
+                                {
+                                    if ( v_3DRangeScans[i_obs].obs->sensorLabel ==
+                                         v_RGBDs_order[i_sensor] )
+                                    {
+                                        v_3DRangeScans[i_obs].obs->sensorPose =
+                                                estimated_pose + v_3DRangeScans[i_obs].obs->sensorPose;
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -2170,6 +2221,11 @@ void computeInitialGuessDifodo()
             }
         }
     }
+
+    cout << "  [INFO] Cameras order: ";
+    for ( size_t i = 0; i < v_cameras_order.size(); i++ )
+            cout << v_cameras_order[i] << " ";
+    cout << endl;
 
     //
     // Load configuration

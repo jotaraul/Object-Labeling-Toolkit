@@ -69,6 +69,9 @@ using namespace std;
 // Useful variables
 //
 
+bool fromHomogeneusMatrixToPose;
+string homogeneusMatrixFile;
+
 string configFileName;
 bool computeScaleBetweenRGBDSensors = false;
 
@@ -258,9 +261,10 @@ int getSensorPosInScalecalib( const string label)
 void showUsageInformation()
 {
     cout << "Usage information. At least one expected arguments: " << endl <<
-            " \t (1) Configuration file." << endl;
+            "    (1) Configuration file." << endl;
    cout << "Then, optional parameters:" << endl <<
-            " \t -h             : Shows this help." << endl;
+            "    -h                         : Shows this help." << endl <<
+            "    -fromHomogeneusMatrixToPose: Show 3D pose from a homogeneus matrix within a file." << endl;
 
 }
 
@@ -516,6 +520,48 @@ void computeTransitiveScale()
     cout << "  [INFO] Done! " << endl << endl;
 }
 
+inline Eigen::Matrix4f getPoseEigenMatrix(const mrpt::poses::CPose3D & pose)
+{
+  Eigen::Matrix4f pose_mat;
+  mrpt::math::CMatrixDouble44 pose_mat_mrpt;
+  pose.getHomogeneousMatrix(pose_mat_mrpt);
+  pose_mat << pose_mat_mrpt(0,0), pose_mat_mrpt(0,1), pose_mat_mrpt(0,2), pose_mat_mrpt(0,3),
+              pose_mat_mrpt(1,0), pose_mat_mrpt(1,1), pose_mat_mrpt(1,2), pose_mat_mrpt(1,3),
+              pose_mat_mrpt(2,0), pose_mat_mrpt(2,1), pose_mat_mrpt(2,2), pose_mat_mrpt(2,3),
+              pose_mat_mrpt(3,0), pose_mat_mrpt(3,1), pose_mat_mrpt(3,2), pose_mat_mrpt(3,3) ;
+  return  pose_mat;
+}
+
+//-----------------------------------------------------------
+//
+//             showPoseFromHomogeneusMatrix
+//
+//-----------------------------------------------------------
+
+void showPoseFromHomogeneusMatrix()
+{
+    Eigen::Matrix4f homoMatrix;
+    cout << "  [INFO] Loading homogeneus matrix from file: " << homogeneusMatrixFile << endl;
+    homoMatrix.loadFromTextFile( homogeneusMatrixFile );
+
+    cout << endl << "    Homogeneus matrix" << endl;
+    cout << homoMatrix << endl << endl;
+
+    mrpt::math::CMatrixDouble44 homoMatrixMRPT(homoMatrix);
+    mrpt::poses::CPose3D rel_pose(homoMatrixMRPT);
+
+    cout << "Relative pos: " << rel_pose << endl;
+
+    mrpt::poses::CPose3D rgbd1_pose(0.271,-0.035,1.015,DEG2RAD(-45),DEG2RAD(0),DEG2RAD(-90));
+
+    cout << "Pose rgbd1  : " << rgbd1_pose << endl;
+    cout << "Pose final  : " << rgbd1_pose + rel_pose << endl << endl;
+
+}
+
+
+
+
 //-----------------------------------------------------------
 //
 //                          main
@@ -556,18 +602,28 @@ int main(int argc, char* argv[])
 
         //
         // Load paramteres
-        //
+        //        
 
-        configFileName = argv[1];
-
-        if ( argc >= 2 )
+        if ( argc >= 1 )
         {
-            for ( size_t arg = 3; arg < argc; arg++ )
+            for ( size_t arg = 1; arg < argc; arg++ )
             {
                 if ( !strcmp(argv[arg],"-h") )
                 {
                     showUsageInformation();
                     return 0;
+                }
+                else if ( !strcmp(argv[arg],"-fromHomogeneusMatrixToPose") )
+                {
+                    fromHomogeneusMatrixToPose = true;
+                    homogeneusMatrixFile = argv[arg+1];
+
+                    arg++;
+                    cout << "  [INFO] Showing 3D pose from homogeneus matrix within a file." << endl;
+                }
+                else if ( !strcmp(argv[arg],"-config") )
+                {
+                    configFileName = homogeneusMatrixFile = argv[arg];
                 }
                 else
                 {
@@ -585,20 +641,25 @@ int main(int argc, char* argv[])
             return 0;
         }
 
-        //
-        // Load config information
-
-        loadConfig();
 
         //
         // What to do?
 
+        if ( fromHomogeneusMatrixToPose )
+            showPoseFromHomogeneusMatrix();
+        else
+        {
+            //
+            // Load config information
 
-        if ( computeScaleBetweenRGBDSensors && !scaleCalibrationConfig.computeTransitiveScale )
-            computeScale();
+            loadConfig();
 
-        else if ( computeScaleBetweenRGBDSensors && scaleCalibrationConfig.computeTransitiveScale )
-            computeTransitiveScale();
+            if ( computeScaleBetweenRGBDSensors && !scaleCalibrationConfig.computeTransitiveScale )
+                computeScale();
+
+            else if ( computeScaleBetweenRGBDSensors && scaleCalibrationConfig.computeTransitiveScale )
+                computeTransitiveScale();
+        }
 
         return 0;
 
