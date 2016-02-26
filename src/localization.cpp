@@ -127,7 +127,7 @@ bool useOverlappingObs  = false;
 bool manuallyFix        = false;
 bool processBySensor    = false;
 bool processInBlock     = false;
-bool visualize2DResults = true;
+bool visualize2DResults = false;
 bool propagateCorrections = true;
 size_t decimation       = 1;
 size_t decimateMemory   = 0;
@@ -223,7 +223,8 @@ void showUsageInformation()
             "    -enable_processInBlock: Enable the processing of the obs from all sensors in block." << endl <<
             "    -enable_processBySensor: Align all the obs from a sensor with all the obs of other one." << endl <<
             "    -enable_RGBDdecimation: Permits to decimate the number of RGB observations to refine the sensors pose." << endl <<
-            "    -enable_memoryDecimation <num>: Decimate the number of obs in the memory by <num>." << endl <<
+            "    -enable_memoryDecimation <num>: Decimate the number of obs in the memory by <num>." << endl <<            
+            "    -enable_visualize2DResults: Visualize localization results in 2D." << endl <<
             "    -disable_propagateCorrections: Disable the propagation of corrections during the refinement." << endl;
 
 }
@@ -335,6 +336,11 @@ int loadParameters(int argc, char **argv)
         {
             processInBlock   = true;
             cout << "  [INFO] Enabled processInBlock."  << endl;
+        }
+        else if ( !strcmp(argv[arg], "-enable_visualize2DResults") )
+        {
+            visualize2DResults   = true;
+            cout << "  [INFO] Enabled 2D results visualization."  << endl;
         }
         else if ( !strcmp(argv[arg], "-enable_processBySensor") )
         {
