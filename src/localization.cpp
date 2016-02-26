@@ -1862,6 +1862,11 @@ void refine()
     size_t N_sensors = RGBD_sensors.size();
     size_t N_scans = v_3DRangeScans.size();
 
+    if ( !v_3DRangeScans.size() )
+        return;
+
+    bool obsHasPoints3D = v_3DRangeScans[0].obs->hasPoints3D;
+
     if ( processBySensor )
     {
         cout << "  -------------------------------------------------" << endl;
@@ -1874,7 +1879,10 @@ void refine()
         {
             T3DRangeScan obs = v_3DRangeScans[obsIndex];
             size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
-            obs.obs->project3DPointsFromDepthImage(false);
+
+            if ( !obsHasPoints3D )
+                obs.obs->project3DPointsFromDepthImage();
+
             v_allObs[sensorIndex].push_back(obs);
         }
 
@@ -1925,7 +1933,7 @@ void refine()
 
             size_t sensorIndex = getRGBDSensorIndex(obs.obs->sensorLabel);
 
-            if ( !obs.obs->hasPoints3D )
+            if ( !obsHasPoints3D )
                 obs.obs->project3DPointsFromDepthImage();
 
             v_obsC[sensorIndex]       = obs;
@@ -2143,6 +2151,18 @@ void refine()
 
                 cout << "    ---------------------------------------------------" << endl;
             }
+        }
+    }
+
+    if ( !obsHasPoints3D )
+    {
+        for ( size_t obsIndex = 0; obsIndex < N_scans; obsIndex++ )
+        {
+            v_3DRangeScans[obsIndex].obs->points3D_x.clear();
+            v_3DRangeScans[obsIndex].obs->points3D_y.clear();
+            v_3DRangeScans[obsIndex].obs->points3D_z.clear();
+
+            v_3DRangeScans[obsIndex].obs->hasPoints3D = false;
         }
     }
 
