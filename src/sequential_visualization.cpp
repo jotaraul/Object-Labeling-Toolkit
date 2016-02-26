@@ -103,12 +103,6 @@ void showUsageInformation()
 
 //-----------------------------------------------------------
 //
-//                        main
-//
-//-----------------------------------------------------------
-
-//-----------------------------------------------------------
-//
 //                    loadParameters
 //
 //-----------------------------------------------------------
@@ -418,6 +412,8 @@ void saveSceneToFile()
     sceneFile += ".scene";
 
     cout << "  [INFO] Saving to scene file " << sceneFile;
+    cout.flush();
+
     scene->saveToFile( sceneFile );
     cout << " ... done" << endl;
 
@@ -452,16 +448,18 @@ int main(int argc, char* argv[])
         //
         // Visualize scene
 
-        visualizeScene();
+        visualizeScene();        
+
+        cout << "  [INFO] Press 's' to save the scene or other key to end the program." << endl;
+        while (win3D.isOpen() && !win3D.keyHit() )
+            mrpt::system::sleep(10);
+
+        int key = win3D.getPushedKey();
 
         //
         // Save the built scene to file
-
-        saveSceneToFile();
-
-        cout << "  [INFO] Close or press a key in the Sequential visualization screen to end the program." << endl;
-        while (win3D.isOpen() && !win3D.keyHit() )
-            mrpt::system::sleep(10);
+        if (( key == 's' ) || ( key == 'S'))
+            saveSceneToFile();
 
         return 0;
 
