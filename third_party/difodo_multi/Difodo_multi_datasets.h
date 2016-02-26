@@ -23,7 +23,8 @@ public:
 
     std::vector<mrpt::obs::CObservation3DRangeScanPtr> v_processedObs;
 	mrpt::opengl::COpenGLScenePtr scene;	//!< Opengl scene
-	mrpt::gui::CDisplayWindow3D	window;
+    bool visualize_results;
+    mrpt::gui::CDisplayWindow3DPtr	window;
     mrpt::obs::CRawlog	dataset;
 	std::ifstream		f_gt;
 	std::ofstream		f_res;
@@ -39,6 +40,7 @@ public:
 	/** Constructor. */
 	CDifodoDatasets() : CDifodo()
 	{
+        visualize_results = false;
 		save_results = 0;
 		first_pose = false;
 		dataset_finished = false;
@@ -48,7 +50,8 @@ public:
     void loadConfiguration(unsigned int &i_rows, unsigned int &i_cols,
                            std::vector<mrpt::poses::CPose3D> &v_poses,
                            const std::string &rawlogFileName,
-                           std::vector<unsigned int> &cameras_order );
+                           std::vector<unsigned int> &cameras_order,
+                           bool visualizeResults);
 
 	/** Load the depth image and the corresponding groundtruth pose */
 	void loadFrame();

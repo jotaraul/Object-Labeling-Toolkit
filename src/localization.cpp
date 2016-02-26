@@ -118,6 +118,7 @@ string simpleMapFile;
 
 bool initialGuessICP2D  = true;
 bool initialGuessDifodo = false;
+bool difodoVisualization = false;
 bool initialGuessGICP   = false;
 bool refineLocalization = false;
 bool accumulatePast     = false;
@@ -143,7 +144,7 @@ bool skip_window=false;
 int  ICP_method = (int) icpLevenbergMarquardt;
 
 CPose2D		initialPose(0.8f,0.0f,(float)DEG2RAD(0.0f));
-gui::CDisplayWindowPlots	win("ICP results");
+gui::CDisplayWindowPlotsPtr	win;
 
 ofstream trajectoryFile("trajectory.txt",ios::trunc);
 
@@ -210,6 +211,8 @@ void showUsageInformation()
     cout << "  Then, optional parameters:" << endl <<
             "    -h             : Show this help." << endl <<
             "    -disable_ICP2D : Disable ICP2D as an initial guess for robot localization." << endl <<
+            "    -enable_difodo : Enable DIFODO as initial guess for robot localization." << endl <<
+            "    -enable_difodoVisualization: Enable DIFODO visualization." << endl <<
             "    -enable_initialGuessGICP : Use GICP to get the initial guess." << endl <<
             "    -enable_ICP    : Enable ICP to refine the RGBD-sensors location." << endl <<
             "    -enable_GICP   : Enable GICP to refine the RGBD-sensors location." << endl <<
@@ -256,11 +259,16 @@ int loadParameters(int argc, char **argv)
             initialGuessICP2D = false;
             cout << "  [INFO] Disabled ICP2D to guess the robot localization."  << endl;
         }
-        if ( !strcmp(argv[arg],"-enable_difodo") )
+        else if ( !strcmp(argv[arg],"-enable_difodo") )
         {
             initialGuessDifodo = true;
             initialGuessICP2D = false;
             cout << "  [INFO] Enabled Difodo odometry to guess the robot localization."  << endl;
+        }
+        else if ( !strcmp(argv[arg],"-enable_difodoVisualization") )
+        {
+            difodoVisualization = true;
+            cout << "  [INFO] Enabled Difodo visualization."  << endl;
         }
         else if ( !strcmp(argv[arg], "-map") )
         {
@@ -464,7 +472,7 @@ void visualizeResults()
     cout << "  [INFO] Visualizing 2D results ...";
     cout.flush();
 
-    win.hold_on();
+    win->hold_on();
 
     CVectorDouble coord_x, coord_y;
     for ( size_t pos_index = 0; pos_index < v_robotPoses.size(); pos_index++ )
@@ -473,8 +481,8 @@ void visualizeResults()
         coord_y.push_back(v_robotPoses[pos_index].pose[1]);
     }
 
-    win.plot(coord_x,coord_y,"-m.3");
-    win.plot(coord_x,coord_y,"k.9");
+    win->plot(coord_x,coord_y,"-m.3");
+    win->plot(coord_x,coord_y,"k.9");
 
     CVectorDouble coord_x2, coord_y2;
 
@@ -488,11 +496,11 @@ void visualizeResults()
         coord_y2.push_back(v_coords[1]);
     }
 
-    win.plot(coord_x2,coord_y2,"g.8");
+    win->plot(coord_x2,coord_y2,"g.8");
 
     v_3DRangeScans.clear(); // Release some memory!
 
-    win.waitForKey();
+    win->waitForKey();
 }
 
 //-----------------------------------------------------------
@@ -731,17 +739,17 @@ void trajectoryICP2D( string &simpleMapFile,
             // Reference map:
             vector<float>   map1_xs, map1_ys, map1_zs;
             m1.getAllPoints(map1_xs,map1_ys,map1_zs);
-            win.plot( map1_xs, map1_ys, "b.3", "map1");
+            win->plot( map1_xs, map1_ys, "b.3", "map1");
 
             // Translated map:
             vector<float>   map2_xs, map2_ys, map2_zs;
             m2.getAllPoints(map2_xs,map2_ys,map2_zs);
-            win.plot( map2_xs, map2_ys, "r.3", "map2");
-            win.axis(-1,10,-6,6);
-            win.axis_equal();
+            win->plot( map2_xs, map2_ys, "r.3", "map2");
+            win->axis(-1,10,-6,6);
+            win->axis_equal();
 
             /*cout << "Close the window to exit" << endl;
-            win.waitForKey();*/
+            win->waitForKey();*/
             mrpt::system::sleep(0);
         }
     }
@@ -799,21 +807,21 @@ void trajectoryICP2D( string &simpleMapFile,
             // Reference map:
             vector<float>   map1_xs, map1_ys, map1_zs;
             m1.getAllPoints(map1_xs,map1_ys,map1_zs);
-            win.plot( map1_xs, map1_ys, "b.3", "map1");
+            win->plot( map1_xs, map1_ys, "b.3", "map1");
 
             // Translated map:
             vector<float>   map2_xs, map2_ys, map2_zs;
             m2_trans.getAllPoints(map2_xs,map2_ys,map2_zs);
-            win.plot( map2_xs, map2_ys, "r.3", "map2");
+            win->plot( map2_xs, map2_ys, "r.3", "map2");
 
             // Uncertainty
-            win.plotEllipse(MEAN2D(0),MEAN2D(1),COV22,3.0,"b2", "cov");
+            win->plotEllipse(MEAN2D(0),MEAN2D(1),COV22,3.0,"b2", "cov");
 
-            win.axis(-1,10,-6,6);
-            win.axis_equal();
+            win->axis(-1,10,-6,6);
+            win->axis_equal();
 
             /*cout << "Close the window to exit" << endl;
-            win.waitForKey();*/
+            win->waitForKey();*/
             mrpt::system::sleep(0);
         }
     }
@@ -2256,7 +2264,8 @@ void computeInitialGuessDifodo()
     //
     // Load configuration
 
-    odo.loadConfiguration(rows,cols,v_poses,i_rawlogFileName,v_cameras_order);
+    odo.loadConfiguration(rows,cols,v_poses,i_rawlogFileName,
+                          v_cameras_order,difodoVisualization);
 
     //
     // Main operation
@@ -2481,6 +2490,9 @@ int main(int argc, char **argv)
             window2 = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: UNALIGNED scans",500,500));
             window3 = CDisplayWindow3DPtr(new CDisplayWindow3D("ICP-3D: ICP-ALIGNED scans",500,500));
         }
+
+        if ( visualize2DResults )
+            win = CDisplayWindowPlotsPtr( new CDisplayWindowPlots("ICP results") );
 
         //
         // Compute initial guess

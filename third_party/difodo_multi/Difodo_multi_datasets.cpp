@@ -36,8 +36,11 @@ using namespace mrpt::poses;
 void CDifodoDatasets::loadConfiguration(unsigned int &i_rows, unsigned int &i_cols,
                                         vector<CPose3D> &v_poses,
                                         const string &rawlogFileName,
-                                        vector<unsigned int> &cameras_order )
+                                        vector<unsigned int> &cameras_order,
+                                        bool visualizeResults )
 {	
+    visualize_results = visualizeResults;
+
 	fovh = M_PI*62.5/180.0;	//Larger FOV because depth is registered with color
 	fovv = M_PI*48.5/180.0;
 
@@ -165,18 +168,23 @@ void CDifodoDatasets::CreateResultsFile()
 
 void CDifodoDatasets::initializeScene()
 {
+    if ( !visualize_results )
+        return;
+
+    window = mrpt::gui::CDisplayWindow3DPtr( new mrpt::gui::CDisplayWindow3D("DIFODO") );
+
 	CPose3D rel_lenspose(0,-0.022,0,0,0,0);
 	
 	global_settings::OCTREE_RENDER_MAX_POINTS_PER_NODE = 1000000;
-	window.resize(1000,900);
-	window.setPos(900,0);
-	window.setCameraZoom(16);
-	window.setCameraAzimuthDeg(0);
-	window.setCameraElevationDeg(90);
-	window.setCameraPointingToPoint(0,0,0);
-	window.setCameraPointingToPoint(0,0,1);
+    window->resize(1000,900);
+    window->setPos(900,0);
+    window->setCameraZoom(16);
+    window->setCameraAzimuthDeg(0);
+    window->setCameraElevationDeg(90);
+    window->setCameraPointingToPoint(0,0,0);
+    window->setCameraPointingToPoint(0,0,1);
 
-	scene = window.get3DSceneAndLock();
+    scene = window->get3DSceneAndLock();
 
 	// Lights:
 	scene->getViewport()->setNumberOfLights(1);
@@ -263,15 +271,18 @@ void CDifodoDatasets::initializeScene()
 	legend->setViewportPosition(20, 20, 332, 164);
 	legend->setImageView(img_legend);
 
-	window.unlockAccess3DScene();
-	window.repaint();
+    window->unlockAccess3DScene();
+    window->repaint();
 }
 
 void CDifodoDatasets::updateScene()
 {
+    if ( !visualize_results )
+        return;
+
 	CPose3D rel_lenspose(0,-0.022,0,0,0,0);
 
-	scene = window.get3DSceneAndLock();
+    scene = window->get3DSceneAndLock();
 
 	//Reference gt
 	CSetOfObjectsPtr reference_gt = scene->getByClass<CSetOfObjects>(0);
@@ -322,8 +333,8 @@ void CDifodoDatasets::updateScene()
     ellip->setCovMatrix(cov3d);
     ellip->setPose(global_pose + rel_lenspose);
 
-	window.unlockAccess3DScene();
-	window.repaint();
+    window->unlockAccess3DScene();
+    window->repaint();
 }
 
 int CDifodoDatasets::getCameraIndex( int camera )
