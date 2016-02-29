@@ -1371,7 +1371,7 @@ void refineLocationGICP( vector<T3DRangeScan> &v_obs,
     //cout << "Setting parameters...";
     
     //ICP options
-    gicp.setMaxCorrespondenceDistance (0.5); // 0.5
+    gicp.setMaxCorrespondenceDistance (0.15); // 0.5
     // Set the maximum number of iterations (criterion 1)
     gicp.setMaximumIterations (35); // 10
     // Set the transformation tras epsilon (criterion 2)
@@ -1459,7 +1459,7 @@ void refineLocationICPWN( vector<T3DRangeScan> &v_obs,
     //cout << "Setting parameters...";
 
     //ICP options
-    icpwn.setMaxCorrespondenceDistance (0.2); // 0.5
+    icpwn.setMaxCorrespondenceDistance (0.1); // 0.5
     // Set the maximum number of iterations (criterion 1)
     icpwn.setMaximumIterations (35); // 10
     // Set the transformation tras epsilon (criterion 2)
@@ -1536,7 +1536,7 @@ void refineLocationICPNL( vector<T3DRangeScan> &v_obs,
     //cout << "Setting parameters...";
 
     //ICP options
-    icpnl.setMaxCorrespondenceDistance (0.2); // 0.5
+    icpnl.setMaxCorrespondenceDistance (0.1); // 0.5
     // Set the maximum number of iterations (criterion 1)
     icpnl.setMaximumIterations (20); // 10
     // Set the transformation tras epsilon (criterion 2)

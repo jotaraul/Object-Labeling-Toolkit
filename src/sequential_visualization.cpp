@@ -56,7 +56,7 @@ using namespace std;
 // Visualization vbles
 mrpt::opengl::COpenGLScenePtr scene;
 mrpt::gui::CDisplayWindow3D  win3D;
-gui::CDisplayWindowPlots	win("Observations 2D pose");
+gui::CDisplayWindowPlotsPtr	win;
 
 // Configuration vbles
 string             i_rawlogFileName; // Rawlog file name
@@ -73,6 +73,7 @@ size_t decimate = 0;
 float distBetweenPoints = 0.02;
 float pointSize = 3;
 bool equalizeRGBDHist = false;
+bool visualize2Dposes = false;
 
 //-----------------------------------------------------------
 //
@@ -87,6 +88,7 @@ void showUsageInformation()
 
     cout << "  Then, optional parameters:" << endl <<
             "    -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
+            "    -visualize2Dposes      : Visualize sensors' poses in a 2D plot." << endl <<
             "    -decimate <num>        : Visualize one of each <num> RGBD observations."  << endl <<
             "    -pointSize <num>       : Size of the points for visualization purposes (default 3)."  << endl <<
             "    -distBetweenPoints <num>: Min distance between two points to insert the second one." << endl <<
@@ -148,7 +150,13 @@ int loadParameters(int argc, char* argv[])
                     cout << "  [INFO] Equalizing RGB images" << endl;
                     arg++;
                 }
+                else if ( !strcmp(argv[arg],"-visualize2Dposes") )
+                {
+                    visualize2Dposes = true;
 
+                    cout << "  [INFO] Visualizing poses in a 2D plot." << endl;
+                    arg++;
+                }
                 else if ( !strcmp(argv[arg],"-pointSize") )
                 {
                     pointSize = atof(argv[arg+1]);
@@ -224,9 +232,34 @@ int loadParameters(int argc, char* argv[])
 void visualizeScene()
 {
     //
+    //  Check the input rawlog file
+
+    if (!mrpt::system::fileExists(i_rawlogFileName))
+        cout << "  [ERROR] Couldn't open rawlog dataset file " <<
+                i_rawlogFileName << endl;
+
+    i_rawlog.open(i_rawlogFileName);
+
+    cout << "  [INFO] Working with " << i_rawlogFileName << endl;
+
+    if ( sensors_to_use.empty() )
+        cout << "  [INFO] Visualizing observations from any sensor." << endl;
+    else
+    {
+        cout << "  [INFO] Visualizing observations from: ";
+        for ( size_t i_sensor = 0; i_sensor < sensors_to_use.size(); i_sensor++ )
+            cout << sensors_to_use[i_sensor] << " ";
+        cout << endl;
+    }
+
+    //
     // Set 3D window and visualization objects
 
-    win3D.setWindowTitle("Sequential visualization");
+    // Get rawlog name
+    vector<string> tokens;
+    mrpt::system::tokenize(i_rawlogFileName,"/",tokens);
+
+    win3D.setWindowTitle(format("Sequential visualization of %s",tokens[tokens.size()-1].c_str()));
 
     win3D.resize(400,300);
 
@@ -256,38 +289,21 @@ void visualizeScene()
     //
     // Set 2D window
 
-    win.hold_on();
+    if ( visualize2Dposes )
+    {
+        win = gui::CDisplayWindowPlotsPtr( new gui::CDisplayWindowPlots("2D poses localization") );
+        win->hold_on();
+    }
 
     //
-    //  Check the input rawlog file
-
-    if (!mrpt::system::fileExists(i_rawlogFileName))
-        cout << "  [ERROR] Couldn't open rawlog dataset file " <<
-                i_rawlogFileName << endl;
-
-    i_rawlog.open(i_rawlogFileName);
-
-    cout << "  [INFO] Working with " << i_rawlogFileName << endl;
-
-    if ( sensors_to_use.empty() )
-        cout << "  [INFO] Visualizing observations from any sensor." << endl;
-    else
-    {
-        cout << "  [INFO] Visualizing observations from: ";
-        for ( size_t i_sensor = 0; i_sensor < sensors_to_use.size(); i_sensor++ )
-            cout << sensors_to_use[i_sensor] << " ";
-        cout << endl;
-    }
+    // Let's go!
 
     mrpt::system::sleep(3000);
 
     size_t N_inserted_point_clouds = 0;
 
-    vector<CRenderizablePtr> v_obsInserted;
-
     //
     // Iterate over the obs into the rawlog and show them in the 3D/2D windows
-    //
 
     cout << "  [INFO] Showing observations from " << N_lowerLimitOfObs << " up to ";
 
@@ -306,7 +322,6 @@ void visualizeScene()
            ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,
                                                 observations,obs,obsIndex) ))
     {
-
         // Check that it is a 3D observation
         if ( !IS_CLASS(obs, CObservation3DRangeScan) )
             continue;
@@ -359,13 +374,17 @@ void visualizeScene()
         size_t N_points = colouredMap.size();
         cout << "    Points in the map: " << N_points << endl;
 
-        // Plot sensor pose into the 2D window
         CVectorDouble coords,x,y;
         pose.getAsVector( coords );
         x.push_back( coords[0] );
         y.push_back( coords[1] );
         CPoint3D point((double)coords[0], (double)coords[1], (double)coords[2]);
-        win.plot(x,y,"b.4");
+
+        if ( visualize2Dposes )
+        {
+            // Plot sensor pose into the 2D window
+            win->plot(x,y,"b.4");
+        }
 
         // Plot point cloud into the 3D window
         scene = win3D.get3DSceneAndLock();
