@@ -55,7 +55,7 @@ using namespace std;
 
 // Visualization vbles
 mrpt::opengl::COpenGLScenePtr scene;
-mrpt::gui::CDisplayWindow3D  win3D;
+mrpt::gui::CDisplayWindow3DPtr  win3D;
 gui::CDisplayWindowPlotsPtr	win;
 
 // Configuration vbles
@@ -235,8 +235,11 @@ void visualizeScene()
     //  Check the input rawlog file
 
     if (!mrpt::system::fileExists(i_rawlogFileName))
+    {
         cout << "  [ERROR] Couldn't open rawlog dataset file " <<
                 i_rawlogFileName << endl;
+        return;
+    }
 
     i_rawlog.open(i_rawlogFileName);
 
@@ -259,16 +262,17 @@ void visualizeScene()
     vector<string> tokens;
     mrpt::system::tokenize(i_rawlogFileName,"/",tokens);
 
-    win3D.setWindowTitle(format("Sequential visualization of %s",tokens[tokens.size()-1].c_str()));
+    win3D = gui::CDisplayWindow3DPtr( new gui::CDisplayWindow3D() );
+    win3D->setWindowTitle(format("Sequential visualization of %s",tokens[tokens.size()-1].c_str()));
 
-    win3D.resize(400,300);
+    win3D->resize(400,300);
 
-    win3D.setCameraAzimuthDeg(140);
-    win3D.setCameraElevationDeg(20);
-    win3D.setCameraZoom(6.0);
-    win3D.setCameraPointingToPoint(2.5,0,0);
+    win3D->setCameraAzimuthDeg(140);
+    win3D->setCameraElevationDeg(20);
+    win3D->setCameraZoom(6.0);
+    win3D->setCameraPointingToPoint(2.5,0,0);
 
-    scene = win3D.get3DSceneAndLock();
+    scene = win3D->get3DSceneAndLock();
 
     opengl::CGridPlaneXYPtr obj = opengl::CGridPlaneXY::Create(-7,7,-7,7,0,1);
     obj->setColor(0.7,0.7,0.7);
@@ -284,7 +288,7 @@ void visualizeScene()
 
     scene->insert( gl_points );
 
-    win3D.unlockAccess3DScene();
+    win3D->unlockAccess3DScene();
 
     //
     // Set 2D window
@@ -387,7 +391,7 @@ void visualizeScene()
         }
 
         // Plot point cloud into the 3D window
-        scene = win3D.get3DSceneAndLock();
+        scene = win3D->get3DSceneAndLock();
 
         gl_points->loadFromPointsMap( &colouredMap );
 
@@ -406,12 +410,12 @@ void visualizeScene()
 
         N_inserted_point_clouds++;
 
-        win3D.unlockAccess3DScene();
-        win3D.repaint();
+        win3D->unlockAccess3DScene();
+        win3D->repaint();
 
         // Step by step execution?
         if ( stepByStepExecution )
-            win3D.waitForKey();
+            win3D->waitForKey();
     }
 
     cout << "  [INFO] Number of points clouds in the scene: " << N_inserted_point_clouds << endl;
@@ -469,16 +473,19 @@ int main(int argc, char* argv[])
 
         visualizeScene();        
 
-        cout << "  [INFO] Press 's' to save the scene or other key to end the program." << endl;
-        while (win3D.isOpen() && !win3D.keyHit() )
-            mrpt::system::sleep(10);
+        if ( !win3D.null() )
+        {
+            cout << "  [INFO] Press 's' to save the scene or other key to end the program." << endl;
+            while ( win3D->isOpen() && !win3D->keyHit() )
+                mrpt::system::sleep(10);
 
-        int key = win3D.getPushedKey();
+            int key = win3D->getPushedKey();
 
-        //
-        // Save the built scene to file
-        if (( key == 's' ) || ( key == 'S'))
-            saveSceneToFile();
+            //
+            // Save the built scene to file
+            if (( key == 's' ) || ( key == 'S'))
+                saveSceneToFile();
+        }
 
         return 0;
 

@@ -1163,7 +1163,9 @@ void removeWeirdObservations()
                     for ( int c = 0; c < cols; c++ )
                         obs3D->rangeImage(r,c) = 0;
 
-                obs3D->project3DPointsFromDepthImage();
+                if ( obs3D->hasPoints3D )
+                    obs3D->project3DPointsFromDepthImage();
+
                 o_rawlog << obs3D;
 
                 //cout << " set to 0!";

@@ -68,11 +68,10 @@ map<string,TPoint3D> m_labelColors; // A map <label,color> to fill the boxes
 vector<CBoxPtr> v_boxes;    // Keep track of the boxes within the scene
 vector<CText3DPtr> v_labels;// Keep track of the labels of the boxes within the scene
 
-mrpt::gui::CDisplayWindow3D  win3D; // Window to visually perform the labeling
+size_t box_editing; // Box currently editing
 
-//
-// AUXILIAR FUNCTIONS
-//
+mrpt::gui::CDisplayWindow3D  win3D; // Window to visually perform the labeling
+mrpt::opengl::COpenGLScenePtr scene; // OpenGL scene showed in the window
 
 
 //-----------------------------------------------------------
@@ -84,7 +83,7 @@ mrpt::gui::CDisplayWindow3D  win3D; // Window to visually perform the labeling
 void showUsageInformation()
 {
     cout << "Usage information. At least one expected argument: " << endl <<
-            " \t <conf_fil>       : Configuration file." << endl;
+            " \t -conf <conf_fil>       : Configuration file." << endl;
     cout << "Then, optional parameters:" << endl <<
             " \t -h                     : This help." << endl <<
             " \t -scene <scene_file>    : Scene file to be labeled/edited." << endl <<
@@ -130,12 +129,75 @@ void loadConfig( string const configFile )
 
     cout << "[INFO] " << m_labelColors.size() << " labels considered." << endl;
 
-//    cout << "[INFO] Loaded labels: " << endl;
-//    map<string,TPoint3D>::iterator it;
-//    for ( it = m_labelColors.begin(); it != m_labelColors.end(); it++ )
-//        cout << " - " << it->first << ", with color " << it->second << endl;
+    //    cout << "[INFO] Loaded labels: " << endl;
+    //    map<string,TPoint3D>::iterator it;
+    //    for ( it = m_labelColors.begin(); it != m_labelColors.end(); it++ )
+    //        cout << " - " << it->first << ", with color " << it->second << endl;
 
     cout << "[INFO] Configuration successfully loaded." << endl;
+
+}
+
+
+//-----------------------------------------------------------
+//
+//                     loadParameters
+//
+//-----------------------------------------------------------
+
+int loadParameters(int argc, char* argv[])
+{
+    bool configurationLoaded = false;
+
+    if ( argc > 1 )
+    {
+        size_t arg = 1;
+
+        while ( arg < argc )
+        {
+            if ( !strcmp(argv[arg],"-h") )
+            {
+                showUsageInformation();
+                return 0;
+            }
+            else if ( !strcmp(argv[arg],"-conf") )
+            {
+                string configFile = argv[arg+1];
+                loadConfig(configFile);
+                configurationLoaded = true;
+
+                arg = arg+2;
+            }
+            else if ( !strcmp(argv[arg],"-showOnlyLabels") )
+            {
+                configuration.showOnlyLabels = true;
+                arg++;
+            }
+            else if ( !strcmp(argv[arg],"-scene") )
+            {
+                configuration.sceneFile = argv[arg+1];
+                arg = arg+2;
+            }
+            else
+            {
+                cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
+                return -1;
+            }
+        }
+    }
+    else
+    {
+        showUsageInformation();
+        return -1;
+    }
+
+    if ( !configurationLoaded )
+    {
+        cout << "[Error] No configuration file specified. Use -conf <conf_file>." << endl;
+        return -1;
+    }
+
+    return 0;
 
 }
 
@@ -291,7 +353,7 @@ void changeUnderlyingPointCloud()
 
     if ( ( newSceneFile.compare(newSceneFile.size()-15,15,"_labelled.scene") )
          && sceneBis.loadFromFile(newSceneFile) )
-    {        
+    {
         cout << " valid :)" << endl;
         sceneFile = newSceneFile;
         sceneFileToSave = sceneFile.substr(0,sceneFile.size()-6) + "_labelled.scene";
@@ -385,61 +447,12 @@ void changeState(const TState newState)
 
 //-----------------------------------------------------------
 //
-//                           main
+//                 initializeVisualization
 //
 //-----------------------------------------------------------
 
-int main(int argc, char* argv[])
+void initializeVisualization()
 {
-    double &OFFSET = configuration.OFFSET;
-    double &OFFSET_ANGLES = configuration.OFFSET_ANGLES;
-
-    // Load configuration
-
-    if ( argc > 1 )
-    {
-        string configFile = argv[1];
-        loadConfig(configFile);
-
-        if ( argc > 2 )
-        {
-            size_t arg = 2;
-
-            while ( arg < argc )
-            {
-                if ( !strcmp(argv[arg],"-h") )
-                {
-                    showUsageInformation();
-                    return 0;
-                }
-                if ( !strcmp(argv[arg],"-showOnlyLabels") )
-                {
-                    configuration.showOnlyLabels = true;
-                    arg++;
-                }
-                else if ( !strcmp(argv[arg],"-scene") )
-                {
-                    configuration.sceneFile = argv[arg+1];
-                    arg = arg+2;
-                }
-                else
-                {
-                    cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
-                    return -1;
-                }
-            }
-        }
-    }
-    else
-    {
-        showUsageInformation();
-        return -1;
-    }
-
-    //
-    // Set 3D window
-    //
-
     win3D.setWindowTitle("Scene labelling");
 
     win3D.resize(600,450);
@@ -449,7 +462,7 @@ int main(int argc, char* argv[])
     win3D.setCameraZoom(6.0);
     win3D.setCameraPointingToPoint(0,0,0);
 
-    mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
+    scene = win3D.get3DSceneAndLock();
 
     opengl::CGridPlaneXYPtr obj = opengl::CGridPlaneXY::Create(-7,7,-7,7,0,1);
     obj->setColor(0.7,0.7,0.7);
@@ -499,7 +512,7 @@ int main(int argc, char* argv[])
     {
         cout << "[INFO] Scene not previously labelled. Press 'n' to start labelling." << endl;
         sceneFileToSave = configuration.sceneFile.substr(0,configuration.sceneFile.size()-6)
-                            + "_labelled.scene";
+                + "_labelled.scene";
     }
 
     //
@@ -525,13 +538,23 @@ int main(int argc, char* argv[])
         win3D.repaint();
     }
 
-    size_t box_editing = 0;
+    box_editing = 0;
 
     changeState(IDLE);
+}
 
-    //
-    // MAIN CONTROL LOOP
-    //
+
+//-----------------------------------------------------------
+//
+//                       labelScene
+//
+//-----------------------------------------------------------
+
+void labelScene()
+{
+
+    double &OFFSET = configuration.OFFSET;
+    double &OFFSET_ANGLES = configuration.OFFSET_ANGLES;
 
     bool end = false;
 
@@ -737,7 +760,7 @@ int main(int argc, char* argv[])
                     break;
                 }
 
-                // SIZE
+                    // SIZE
 
                 case ( MRPTK_LEFT ) : // y axis left
                 {
@@ -1025,6 +1048,54 @@ int main(int argc, char* argv[])
         mrpt::system::sleep(10);
     }
 
+}
 
-    return 0;
+
+//-----------------------------------------------------------
+//
+//                           main
+//
+//-----------------------------------------------------------
+
+int main(int argc, char* argv[])
+{
+    cout << endl << "-----------------------------------------------------" << endl;
+    cout <<         "                Label scene app.                     " << endl;
+    cout <<         "            [Object Labeling Tookit]                 " << endl;
+    cout <<         "-----------------------------------------------------" << endl << endl;
+
+    try
+    {
+        //
+        // Load parameters
+
+        int res = loadParameters(argc,argv);
+
+        if (res)
+            return -1;
+
+        //
+        // Initialize visualization
+
+        initializeVisualization();
+
+        //
+        // Label scene!
+
+        labelScene();
+
+        // All done, see you! :)
+        return 0;
+
+    }
+    catch (exception &e)
+    {
+        cout << "Exception caught: " << e.what() << endl;
+        return -1;
+    }
+    catch (...)
+    {
+        printf("Another exception!!");
+        return -1;
+    }
 }
