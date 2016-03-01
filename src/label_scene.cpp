@@ -610,6 +610,49 @@ void labelScene()
                     win3D.unlockAccess3DScene();
                     win3D.forceRepaint();
 
+                    // Move the mouse to the object centroid in the XY plane and push any key
+
+                    win3D.waitForKey();
+
+                    TPoint3D point;
+                    TLine3D ray;
+                    TObject3D obj;
+
+                    win3D.getLastMousePositionRay(ray);
+
+                    TPlane planeXY(TPoint3D(1,0,0),TPoint3D(0,1,0),TPoint3D(0,0,0));
+
+                    intersect(planeXY,ray,obj);
+
+                    obj.getPoint(point);
+
+                    CPose3D newPose;
+                    newPose.x(point.x);
+                    newPose.y(point.y);
+
+                    box->setPose(newPose);
+
+                    win3D.clearKeyHitFlag();
+
+                    // Move the mouse to the object centroid in the XZ plane and push any key
+
+                    win3D.waitForKey();
+
+                    win3D.getLastMousePositionRay(ray);
+
+                    TPlane planeXZ(TPoint3D(1,0,0),TPoint3D(0,0,1),TPoint3D(0,0,0));
+
+                    intersect(planeXZ,ray,obj);
+                    obj.getPoint(point);
+
+                    newPose.z(point.z);
+
+                    win3D.clearKeyHitFlag();
+
+                    // Set the new box pose!
+
+                    box->setPose(newPose);
+
                     v_boxes.push_back( box );
                     v_labels.push_back( text );
 
