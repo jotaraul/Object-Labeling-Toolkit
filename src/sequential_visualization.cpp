@@ -473,6 +473,9 @@ int main(int argc, char* argv[])
 
         visualizeScene();        
 
+        //
+        // Decide if save the scene or not
+
         if ( !win3D.null() )
         {
             cout << "  [INFO] Press 's' to save the scene or other key to end the program." << endl;

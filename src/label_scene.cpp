@@ -29,6 +29,14 @@
 #include <mrpt/obs/CRawlog.h>
 #include <mrpt/system/threads.h>
 
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/segmentation/planar_region.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/point_types.h>
+
+using namespace pcl;
+
 using namespace mrpt::utils;
 using namespace mrpt::gui;
 using namespace mrpt::math;
@@ -55,6 +63,13 @@ struct TConfiguration
 };
 
 TConfiguration configuration;
+
+struct features
+{
+    float L,W,H; // Lenght, width, height
+};
+
+map<string,features> m_categoryFeats;
 
 size_t visualization_mode = 0;      // Initial visualization mode
 size_t N_visualization_modes = 7;   // Number of visualization modes
@@ -127,14 +142,14 @@ void loadConfig( string const configFile )
     for ( size_t i_label = 0; i_label < v_labelNames.size(); i_label++ )
         m_labelColors[v_labelNames[i_label]] = v_colors[i_label];
 
-    cout << "[INFO] " << m_labelColors.size() << " labels considered." << endl;
+    cout << "  [INFO] " << m_labelColors.size() << " labels considered." << endl;
 
-    //    cout << "[INFO] Loaded labels: " << endl;
+    //    cout << "  [INFO] Loaded labels: " << endl;
     //    map<string,TPoint3D>::iterator it;
     //    for ( it = m_labelColors.begin(); it != m_labelColors.end(); it++ )
     //        cout << " - " << it->first << ", with color " << it->second << endl;
 
-    cout << "[INFO] Configuration successfully loaded." << endl;
+    cout << "  [INFO] Configuration successfully loaded." << endl;
 
 }
 
@@ -201,6 +216,257 @@ int loadParameters(int argc, char* argv[])
 
 }
 
+
+//-----------------------------------------------------------
+//
+//                   segmentPointCloud
+//
+//-----------------------------------------------------------
+
+void segmentPointCloud()
+{
+    // Experimental method!
+
+    size_t N_inliers;	// Number of inliers of the fitted plane in each iteration
+    std::vector<int> indices;
+
+
+    CPointCloudColouredPtr opengl_cloud = scene->getByClass<CPointCloudColoured>(0);
+
+    size_t N_points = opengl_cloud->size();
+    PointCloud<PointXYZ>::Ptr cloud   (new PointCloud<PointXYZ>());
+
+    for (size_t i = 0; i < N_points; i++)
+    {
+        TPoint3Df point = opengl_cloud->getPointf(i);
+
+        cloud->push_back(PointXYZ(point.x,point.y,point.z));
+    }
+
+    do {
+        // Create the segmentation object
+        pcl::SACSegmentation<pcl::PointXYZ> seg;
+        pcl::PointIndices::Ptr				inliers ( new pcl::PointIndices() );
+        pcl::ModelCoefficients::Ptr			coeffs( new pcl::ModelCoefficients() );
+
+        // Optional
+        //seg.setOptimizeCoefficients (true);
+
+        // Mandatory
+        seg.setInputCloud( cloud );
+
+        if ( indices.size() )
+        {
+            vector<int>							indicesInverse;
+
+            // Create the filtering object
+            pcl::ExtractIndices<pcl::PointXYZ> extract;
+
+            // Extract the inliers
+            extract.setInputCloud ( cloud );
+            extract.setIndices( pcl::IndicesPtr( new vector<int>(indices) ) );
+            extract.setNegative ( true );
+            extract.filter ( indicesInverse );
+
+            seg.setIndices( pcl::IndicesPtr( new vector<int>(indicesInverse) ) );
+
+            cout << "Num of indices to take into accout: " << indicesInverse.size() << endl;
+
+        }
+
+        seg.setMethodType ( pcl::SAC_RANSAC );
+        seg.setModelType ( pcl::SACMODEL_PLANE );
+        seg.setMaxIterations ( 1000 );
+        seg.setDistanceThreshold ( 0.10 );
+        seg.setEpsAngle ( 0.17 ); // ~10 degrees
+
+        // Detect!
+        seg.segment( *inliers, *coeffs );
+
+        N_inliers = inliers->indices.size();
+
+        //////////////////// VISUALIZATION ///////////////////////
+        boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer (new pcl::visualization::PCLVisualizer ("Detection step"));
+
+        pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloudOriginal( new pcl::PointCloud<pcl::PointXYZRGBA>() );
+        pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloudPlaneDetected( new pcl::PointCloud<pcl::PointXYZRGBA>() );
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloudOriginalAux( new pcl::PointCloud<pcl::PointXYZ>() );
+        pcl::PointCloud<pcl::PointXYZ>::Ptr cloudPlaneDetectedAux( new pcl::PointCloud<pcl::PointXYZ>() );
+
+        // Create the filtering object
+        pcl::ExtractIndices<pcl::PointXYZ> extract;
+        /////////////////// END VISUALIZATION /////////////////////
+
+        if ( N_inliers > 1000 )
+        {
+            //////////////////// VISUALIZATION ///////////////////////
+            if ( indices.size() )
+            {
+                extract.setInputCloud ( cloud );
+                extract.setIndices ( pcl::IndicesPtr( new vector<int>(indices) ) );
+                extract.setNegative ( true );
+                extract.filter ( *cloudOriginalAux );
+
+                cout << "Size of original aux: " << cloudOriginalAux->size() << endl;
+
+                pcl::copyPointCloud(*cloudOriginalAux,*cloudOriginal);
+            }
+            else
+            {
+                pcl::copyPointCloud(*cloud,*cloudOriginal);
+
+                cout << "Size of original aux (cloud): " << cloud->size() << endl;
+            }
+            /////////////////// END VISUALIZATION /////////////////////
+
+            pcl::PointCloud<pcl::PointXYZ>::Ptr cloudPlaneDetectedAux( new pcl::PointCloud<pcl::PointXYZ>() );
+
+            //CPlane plane( inliers, coeffs, type );
+            //cout << plane << endl;
+            //planes.push_back( plane );
+            indices.insert( indices.end(), inliers->indices.begin(), inliers->indices.end() );
+        }
+
+        // Extract the inliers
+        pcl::ExtractIndices<pcl::PointXYZ> extract2;
+        extract2.setInputCloud ( cloud );
+        extract2.setIndices ( inliers );
+        extract2.setNegative ( false );
+        extract2.filter ( *cloudPlaneDetectedAux );
+
+        cout << "Size of plane detected aux: " << cloudPlaneDetectedAux->size() << endl;
+
+        pcl::copyPointCloud(*cloudPlaneDetectedAux,*cloudPlaneDetected);
+
+        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> blue(cloudPlaneDetected,0,0,255);
+        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZRGBA> red(cloudOriginal,255,0,0);
+
+        viewer->addPointCloud<pcl::PointXYZRGBA> (cloudOriginal,red,"cloud1");
+        viewer->addPointCloud<pcl::PointXYZRGBA> (cloudPlaneDetected,blue,"cloud2");
+
+        viewer->setBackgroundColor (0.5, 0.5, 0.5);
+        viewer->addCoordinateSystem (1.0);
+        viewer->initCameraParameters ();
+
+        while (!viewer->wasStopped ())
+        {
+            viewer->spinOnce (100);
+            mrpt::system::sleep(100);
+        }
+
+    }
+    while( N_inliers > 1000 );
+}
+
+
+//-----------------------------------------------------------
+//
+//                     loadCategoryFeatures
+//
+//-----------------------------------------------------------
+
+void loadCategoryFeat()
+{
+    ifstream file("label_scene-category_features.txt");
+
+    if ( !file.is_open() )
+        return;
+
+    size_t N_labels;
+
+    file >> N_labels;
+
+    for ( size_t i_label = 0; i_label < N_labels; i_label++ )
+    {
+        string category;
+        float L,W,H;
+
+        file >> category >> L >> W >> H;
+
+        features feat;
+        feat.L = L;
+        feat.W = W;
+        feat.H = H;
+
+        m_categoryFeats[category] = feat;
+    }
+
+    cout << "  [INFO] Features of objects' categories loaded (" << N_labels << ")" << endl;
+}
+
+
+//-----------------------------------------------------------
+//
+//                     saveCategoryFeat
+//
+//-----------------------------------------------------------
+
+void saveCategoryFeat()
+{
+    ofstream file("label_scene-category_features.txt");
+
+    if ( !file.is_open() )
+        return;
+
+    size_t N_labels = m_categoryFeats.size();
+
+    file << N_labels << endl;
+
+
+    for ( map<string,features>::iterator it = m_categoryFeats.begin();
+          it != m_categoryFeats.end(); it++ )
+    {
+        file << it->first << " " << it->second.L << " " << it->second.W << " " << it->second.H << endl;
+    }
+
+    cout << "  [INFO] Features of objects' categories saved to file (" << N_labels << ")" << endl;
+}
+
+
+//-----------------------------------------------------------
+//
+//                     getCategoryFeat
+//
+//----------------------------------------------------------
+
+size_t getCategoryFeat(const string &cat, features &feat)
+{
+    if ( m_categoryFeats.count(cat) )
+    {
+        feat = m_categoryFeats[cat];
+        return 1;
+    }
+    else // Category doesn't exist
+        return 0;
+}
+
+
+//-----------------------------------------------------------
+//
+//                    updateCategoryFeat
+//
+//----------------------------------------------------------
+
+void updateCategoryFeat(string &cat, features &feat)
+{
+    if ( cat.empty() )
+        return;
+
+    if ( m_categoryFeats.count(cat) )
+    {
+        features new_feat;
+        features old_feat = m_categoryFeats[cat];
+        new_feat.L = old_feat.L*0.9 + feat.L*0.1;
+        new_feat.W = old_feat.W*0.9 + feat.W*0.1;
+        new_feat.H = old_feat.H*0.9 + feat.H*0.1;
+
+        m_categoryFeats[cat] = new_feat;
+    }
+    else // Category doesn't exist
+        m_categoryFeats[cat] = feat;
+
+}
 
 //-----------------------------------------------------------
 //
@@ -347,7 +613,7 @@ void changeUnderlyingPointCloud()
     if ( newSceneFile[newSceneFile.size()-1] == '\'' )
         newSceneFile = newSceneFile.substr(0,newSceneFile.size()-1);
 
-    cout << "[INFO] Checking if " << newSceneFile << " is a valid scene file ..." ;
+    cout << "  [INFO] Checking if " << newSceneFile << " is a valid scene file ..." ;
 
     mrpt::opengl::COpenGLScene sceneBis;
 
@@ -386,7 +652,7 @@ void changeUnderlyingPointCloud()
     win3D.unlockAccess3DScene();
     win3D.forceRepaint();
 
-    cout << "[INFO] New scene successfully loaded" << endl;
+    cout << "  [INFO] New scene successfully loaded" << endl;
 
 }
 
@@ -403,6 +669,7 @@ void showIDLEMenu()
     win3D.addTextMessage(0.02,0.06+0.03*0, "          'c': change underlying scene 's': save scene 'v': change visualization 'esc': exit", TColorf(1,1,1),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*2, "", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*3, "", TColorf(1,1,1),13,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*4, "", TColorf(1,1,1),14,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
 }
 
 
@@ -418,6 +685,7 @@ void showEDITINGMenu()
     win3D.addTextMessage(0.02,0.06+0.03*1, "[Moves] 'up': +x 'down': -x 'left': +y 'right': -y '1': +z '0': -z", TColorf(1,1,1),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*2, "[Size]  '7': +x '4': -x '8': +y '5': -y '9': +z '6': -z", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*3, "[Misc]  'l': label 'r': reset 'enter': finish editing", TColorf(1,1,1),13,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*4, "", TColorf(1,1,1),14,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
 }
 
 
@@ -470,9 +738,9 @@ void initializeVisualization()
     scene->insert( obj );
 
     if (scene->loadFromFile(configuration.sceneFile))
-        cout << "[INFO] Scene " << configuration.sceneFile << " loaded" << endl;
+        cout << "  [INFO] Scene " << configuration.sceneFile << " loaded" << endl;
     else
-        cout << "[INFO] Error while loading scene " << configuration.sceneFile << endl;
+        cout << "  [INFO] Error while loading scene " << configuration.sceneFile << endl;
 
     win3D.unlockAccess3DScene();
     win3D.repaint();
@@ -483,7 +751,7 @@ void initializeVisualization()
 
     if ( !configuration.sceneFile.compare(configuration.sceneFile.size()-15,15,"_labelled.scene") )
     {
-        cout << "[INFO] Scene previously labelled. Loading labels... ";
+        cout << "  [INFO] Scene previously labelled. Loading labels... ";
 
         // Load previously inserted boxes
         bool keepLoading = true;
@@ -510,7 +778,7 @@ void initializeVisualization()
     }
     else
     {
-        cout << "[INFO] Scene not previously labelled. Press 'n' to start labelling." << endl;
+        cout << "  [INFO] Scene not previously labelled. Press 'n' to start labelling." << endl;
         sceneFileToSave = configuration.sceneFile.substr(0,configuration.sceneFile.size()-6)
                 + "_labelled.scene";
     }
@@ -540,9 +808,182 @@ void initializeVisualization()
 
     box_editing = 0;
 
+    //
+    // Load features from the object categories previously considered
+    loadCategoryFeat();
+
     changeState(IDLE);
 }
 
+
+//-----------------------------------------------------------
+//
+//                     readStringFromWindow
+//
+//-----------------------------------------------------------
+
+string readStringFromWindow(const string &text, string initial_string="")
+{
+    string read = initial_string;
+    bool done = false;
+
+    while(!done)
+    {
+        win3D.addTextMessage(0.02,1-0.06, format("%s %s",text.c_str(),read.c_str()), TColorf(1,1,1),20,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+        win3D.forceRepaint();
+        cout << '\r' << text << read << "                 ";
+        cout.flush();
+
+        int key = win3D.waitForKey(false);
+
+        switch (key)
+        {
+        case MRPTK_BACK:
+            if ( read.size() )
+                read.erase( read.end()-1, read.end());
+            break;
+        case MRPTK_RETURN:
+            done = true;
+            break;
+        default:
+            read.append(string(1,char(key)));
+        }
+
+
+        //cout << read << '\xd';
+        cout.flush();
+    }
+
+    win3D.addTextMessage(0.02,1-0.06, "", TColorf(1,1,1),20,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+
+    cout << endl;
+
+    return read;
+}
+
+void addNewBox(string &objectCategory)
+{
+    // Get category name
+    string cat = readStringFromWindow("    Adding bounding box. Insert the category of the object (empty to skip): ");
+    cout.flush();
+
+    opengl::CBoxPtr box;
+
+    if ( !cat.empty() )
+    {
+        // New object category (label)?
+        features feat;
+
+        int res = getCategoryFeat(cat,feat);
+
+        if ( res ) // Existing category
+        {
+            box = opengl::CBox::Create(TPoint3D(-feat.W/2,-feat.L/2,-feat.H/2),
+                                       TPoint3D(feat.W/2,feat.L/2,feat.H/2) );
+        }
+        else// New category
+        {
+            cout << "  [INFO] New object category!" << endl;
+            box = opengl::CBox::Create(TPoint3D(-0.05,-0.1,-0.1),TPoint3D(0.1,0.1,0.1) );
+        }
+
+        objectCategory = cat;
+    }
+    else
+    {
+        //opengl::CBoxPtr box = opengl::CBox::Create(TPoint3D(-0.1,-0.2,-0.2),TPoint3D(0.2,0.2,0.2) );
+        box = opengl::CBox::Create(TPoint3D(-0.05,-0.1,-0.1),TPoint3D(0.1,0.1,0.1) );
+    }
+
+    box->setWireframe();
+    box->setLineWidth(5);
+
+    win3D.addTextMessage(0.02,0.06+0.03*2, "Adding bounding box. Move the mouse to the object centroid in the XY plane and press any key.", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.forceRepaint();
+
+    opengl::CText3DPtr text = opengl::CText3D::Create();
+    text->setString( box->getName() );
+
+    mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
+
+    scene->insert( box );
+
+    scene->insert( text );
+
+    win3D.unlockAccess3DScene();
+    win3D.forceRepaint();
+
+    // Move the mouse to the object centroid in the XY plane and push any key
+
+    win3D.waitForKey();
+
+    TPoint3D point;
+    TLine3D ray;
+    TObject3D obj;
+
+    win3D.getLastMousePositionRay(ray);
+
+    TPlane planeXY(TPoint3D(1,0,0),TPoint3D(0,1,0),TPoint3D(0,0,0));
+
+    mrpt::math::intersect(planeXY,ray,obj);
+
+    obj.getPoint(point);
+
+    CPose3D newPose;
+    newPose.x(point.x);
+    newPose.y(point.y);
+
+    box->setPose(newPose);
+
+    win3D.forceRepaint();
+
+    /*// Move the mouse to the object centroid in the XZ plane and push any key
+
+    win3D.waitForKey();
+
+    win3D.getLastMousePositionRay(ray);
+
+    TPlane planeXZ(TPoint3D(1,0,0),TPoint3D(0,0,1),TPoint3D(0,0,0));
+
+    intersect(planeXZ,ray,obj);
+    obj.getPoint(point);
+
+    newPose.z(point.z);
+
+    win3D.clearKeyHitFlag();*/
+
+    win3D.addTextMessage(0.02,0.06+0.03*2, "Adding bounding box. 'Now press the left mouse button 'a' (bottom) 's' (middle) or 'd' (top) to set the height.", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+
+    int key = -1;
+
+    while ( ( key != 'a' ) && ( key != 's' )
+            && ( key != 'd' ) )
+        key = win3D.waitForKey();
+
+    switch (key)
+    {
+    case 'a':
+            newPose.z(0.2);
+            break;
+    case 's':
+            newPose.z(0.75);
+            break;
+    case 'd':
+            newPose.z(1.5);
+            break;
+    }
+
+    // Set the new box pose!
+
+    box->setPose(newPose);
+    win3D.forceRepaint();
+
+    v_boxes.push_back( box );
+    v_labels.push_back( text );
+
+    changeState(EDITING);
+    box_editing = v_boxes.size()-1;
+}
 
 //-----------------------------------------------------------
 //
@@ -555,6 +996,8 @@ void labelScene()
 
     double &OFFSET = configuration.OFFSET;
     double &OFFSET_ANGLES = configuration.OFFSET_ANGLES;
+
+    string objectCategory;
 
     bool end = false;
 
@@ -594,78 +1037,15 @@ void labelScene()
                 {
                 case ('n') : // New bounding box
                 {
-                    opengl::CBoxPtr box = opengl::CBox::Create(TPoint3D(-0.1,-0.2,-0.2),TPoint3D(0.2,0.2,0.2) );
-                    box->setWireframe();
-                    box->setLineWidth(5);
+                    addNewBox(objectCategory);
 
-                    opengl::CText3DPtr text = opengl::CText3D::Create();
-                    text->setString( box->getName() );
-
-                    mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
-
-                    scene->insert( box );
-
-                    scene->insert( text );
-
-                    win3D.unlockAccess3DScene();
-                    win3D.forceRepaint();
-
-                    // Move the mouse to the object centroid in the XY plane and push any key
-
-                    win3D.waitForKey();
-
-                    TPoint3D point;
-                    TLine3D ray;
-                    TObject3D obj;
-
-                    win3D.getLastMousePositionRay(ray);
-
-                    TPlane planeXY(TPoint3D(1,0,0),TPoint3D(0,1,0),TPoint3D(0,0,0));
-
-                    intersect(planeXY,ray,obj);
-
-                    obj.getPoint(point);
-
-                    CPose3D newPose;
-                    newPose.x(point.x);
-                    newPose.y(point.y);
-
-                    box->setPose(newPose);
-
-                    win3D.clearKeyHitFlag();
-
-                    // Move the mouse to the object centroid in the XZ plane and push any key
-
-                    win3D.waitForKey();
-
-                    win3D.getLastMousePositionRay(ray);
-
-                    TPlane planeXZ(TPoint3D(1,0,0),TPoint3D(0,0,1),TPoint3D(0,0,0));
-
-                    intersect(planeXZ,ray,obj);
-                    obj.getPoint(point);
-
-                    newPose.z(point.z);
-
-                    win3D.clearKeyHitFlag();
-
-                    // Set the new box pose!
-
-                    box->setPose(newPose);
-
-                    v_boxes.push_back( box );
-                    v_labels.push_back( text );
-
-                    changeState(EDITING);
-                    box_editing = v_boxes.size()-1;
-
-                    cout << "[INFO] Inserted new box to edit" << endl;
+                    cout << "  [INFO] Inserted new box to edit" << endl;
 
                     break;
                 }
                 case ('b') :
                 {
-                    cout << "[INFO] Showing list of stored boxes" << endl;
+                    cout << "  [INFO] Showing list of stored boxes" << endl;
 
                     if ( !v_boxes.size() )
                         cout << "No boxes stored" << endl;
@@ -687,7 +1067,7 @@ void labelScene()
                     {
                         box_editing = box_index;
                         changeState(EDITING);
-                        cout << "[INFO] editin box with index " << box_editing << endl;
+                        cout << "  [INFO] editin box with index " << box_editing << endl;
                     }
                     else
                         cout << "Invalid box index. Press 'b' to see a list of the stored boxes." << endl;
@@ -696,13 +1076,16 @@ void labelScene()
                 }
                 case ('s') :
                 {
-                    cout << "[INFO] Saving scene to " << sceneFileToSave << " ... ";
-                    mrpt::system::sleep(50);
+                    cout << "  [INFO] Saving scene to " << sceneFileToSave << " ... ";
+                    cout.flush();
 
                     if ( scene->saveToFile(sceneFileToSave) )
                         cout << "done" << endl;
                     else
                         cout << "error" << endl;
+
+                    saveCategoryFeat();
+
                     break;
                 }
                 case ('v') :
@@ -736,17 +1119,17 @@ void labelScene()
                         win3D.unlockAccess3DScene();
                         win3D.forceRepaint();
 
-                        cout << "[INFO] Box deleted" << endl;
+                        cout << "  [INFO] Box deleted" << endl;
                     }
                     else
-                        cout << "[INFO] Error, invalid box index. Press 'b' to see the list of tracked boxes" << endl;
+                        cout << "  [INFO] Error, invalid box index. Press 'b' to see the list of tracked boxes" << endl;
 
                     break;
                 }
                 case (MRPTK_ESCAPE) :
                 {
                     char option;
-                    cout << "[INFO] Exiting, are you sure? (y/n): ";
+                    cout << "  [INFO] Exiting, are you sure? (y/n): ";
                     cin >> option;
 
                     if ( option == 'y' )
@@ -958,9 +1341,8 @@ void labelScene()
                 }
                 case ('l') : // add label
                 {
-                    string boxLabel;
-                    cout << "box_label: ";
-                    cin >> boxLabel;
+                    string boxLabel = readStringFromWindow("    Setting box_label: ", objectCategory);
+                    cout.flush();
 
                     label->setString( boxLabel );
                     label->setScale(0.06);
@@ -977,8 +1359,32 @@ void labelScene()
                 }
                 case ( MRPTK_RETURN ): // Finished editing
                 {
+                    TPose3D pose = box->getPose();
+
+                    box->getBoxCorners(c1,c2);
+
+                    TPoint3D C111 ( CPose3D(pose) + TPose3D(TPoint3D(c1.x,c1.y,c1.z)) );
+                    TPoint3D C112 ( CPose3D(pose) + TPose3D(TPoint3D(c1.x,c1.y,c2.z)) );
+                    TPoint3D C121 ( CPose3D(pose) + TPose3D(TPoint3D(c1.x,c2.y,c1.z)) );
+                    TPoint3D C122 ( CPose3D(pose) + TPose3D(TPoint3D(c1.x,c2.y,c2.z)) );
+                    TPoint3D C211 ( CPose3D(pose) + TPose3D(TPoint3D(c2.x,c1.y,c1.z)) );
+                    TPoint3D C212 ( CPose3D(pose) + TPose3D(TPoint3D(c2.x,c1.y,c2.z)) );
+                    TPoint3D C221 ( CPose3D(pose) + TPose3D(TPoint3D(c2.x,c2.y,c1.z)) );
+                    TPoint3D C222 ( CPose3D(pose) + TPose3D(TPoint3D(c2.x,c2.y,c2.z)) );
+
+                    features feat;
+
+                    feat.L = C111.distanceTo(C121);
+                    feat.W = C111.distanceTo(C211);
+                    feat.H = C111.distanceTo(C112);
+
+                    updateCategoryFeat(objectCategory,feat);
+
+                    objectCategory = "";
+
                     changeState(IDLE);
-                    cout << "[INFO] Finished editing box. IDLE state." << endl;
+
+                    cout << "  [INFO] Finished editing box. IDLE state." << endl;
                     break;
                 }
                 default:
@@ -1121,6 +1527,11 @@ int main(int argc, char* argv[])
         // Initialize visualization
 
         initializeVisualization();
+
+        //
+        // Segment point cloud (not ready yet!)
+
+        //segmentPointCloud();
 
         //
         // Label scene!
