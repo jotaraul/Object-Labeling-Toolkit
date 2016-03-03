@@ -32,6 +32,11 @@
 #include <mrpt/utils/CConfigFile.h>
 #include <mrpt/gui/CDisplayWindow.h>
 
+#include <mrpt/utils/CFileGZInputStream.h>
+#include <mrpt/utils/CFileGZOutputStream.h>
+
+#include <mrpt/system.h>
+
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <mrpt/maps/PCL_adapters.h>
@@ -95,6 +100,10 @@ struct TConfiguration
 //
 
 TConfiguration          configuration;
+
+vector<string> sensors_to_use;
+CFileGZInputStream i_rawlog;
+CFileGZOutputStream o_rawlog;
 
 vector<TLabelledBox>    v_labelled_boxes;
 map<string,TPoint3D>    m_consideredLabels; // Map <label,color>
@@ -180,14 +189,14 @@ void loadConfig( string const configFile )
     for ( size_t i_label = 0; i_label < v_labelNames.size(); i_label++ )
         m_consideredLabels[v_labelNames[i_label]] = v_colors[i_label];
 
-    cout << "[INFO] Loaded labels: " << endl;
+    /*cout << "[INFO] Loaded labels: " << endl;
 
     map<string,TPoint3D>::iterator it;
 
     for ( it = m_consideredLabels.begin(); it != m_consideredLabels.end(); it++ )
-        cout << " - " << it->first << ", with color " << it->second << endl;
+        cout << " - " << it->first << ", with color " << it->second << endl;*/
 
-    cout << "[INFO] Configuration successfully loaded." << endl;
+    cout << "  [INFO] Configuration successfully loaded." << endl;
 
 }
 
@@ -269,13 +278,13 @@ void  loadLabelledScene()
                 if ( !configuration.instancesLabeled )
                 {
                     if ( !m_consideredLabels.count(labelled_box.label) )
-                        cout << "[CAUTION] label " << labelled_box.label << " does not appear in the label list." << endl;
+                        cout << "  [CAUTION] label " << labelled_box.label << " does not appear in the label list." << endl;
                 }
                 else
                 {
                     string label = getInstanceLabel(labelled_box.label);
                     if ( label.empty() )
-                        cout << "[CAUTION] label of instance " << labelled_box.label << " does not appear in the label list." << endl;
+                        cout << "  [CAUTION] label of instance " << labelled_box.label << " does not appear in the label list." << endl;
                 }
 
 
@@ -289,11 +298,11 @@ void  loadLabelledScene()
             boxes_inserted++;
         }
 
-        cout << "[INFO] " << v_labelled_boxes.size() <<  " labelled boxes loaded." << endl;
+        cout << "  [INFO] " << v_labelled_boxes.size() <<  " labelled boxes loaded." << endl;
 
     }
     else
-        cout << "[ERROR] While loading the labelled scene file." << endl;
+        cout << "  [ERROR] While loading the labelled scene file." << endl;
 
 }
 
@@ -493,6 +502,195 @@ void labelObs(CObservation3DRangeScanPtr obs,
 
 //-----------------------------------------------------------
 //
+//                        loadParameters
+//
+//-----------------------------------------------------------
+
+int loadParameters(int argc, char* argv[])
+{
+    bool stepByStepExecution = false;
+
+    if ( argc > 1 )
+    {
+        size_t arg = 1;
+
+        while ( arg < argc )
+        {
+            if ( !strcmp(argv[arg],"-h") )
+            {
+                showUsageInformation();
+                arg++;
+            }
+            else if ( !strcmp(argv[arg],"-i") )
+            {
+                configuration.rawlogFile = argv[arg+1];
+                arg += 2;
+            }
+            else if ( !strcmp(argv[arg],"-config") )
+            {
+                string configFile = argv[arg+1];
+                loadConfig(configFile);
+                arg += 2;
+            }
+            else if ( !strcmp(argv[arg],"-l") )
+            {
+                configuration.labelledScene = argv[arg+1];
+                arg += 2;
+            }
+            else if ( !strcmp(argv[arg],"-sensor") )
+            {
+                string sensor = argv[arg+1];
+                sensors_to_use.push_back(  sensor );
+                arg += 2;
+            }
+            else if ( !strcmp(argv[arg], "-step") )
+            {
+                stepByStepExecution = true;
+                arg++;
+            }
+            else
+            {
+                cout << "  [Error] " << argv[arg] << " unknown paramter" << endl;
+                return -1;
+            }
+
+        }
+
+    }
+    else
+    {
+        showUsageInformation();
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+//-----------------------------------------------------------
+//
+//                       labelRawlog
+//
+//-----------------------------------------------------------
+
+void labelRawlog()
+{
+    if ( sensors_to_use.empty() )
+        cout << "  [INFO] Considering observations from any sensor." << endl;
+    else
+    {
+        cout << "  [INFO] Considering observations from: ";
+        for ( size_t i_sensor = 0; i_sensor < sensors_to_use.size(); i_sensor++ )
+            cout << sensors_to_use[i_sensor] << " ";
+        cout << endl;
+    }
+
+    //
+    // Check input rawlog file
+
+    if (!mrpt::system::fileExists(configuration.rawlogFile))
+    {
+        cerr << "  [ERROR] A rawlog file with name " << configuration.rawlogFile;
+        cerr << " doesn't exist." << endl;
+        // return;
+    }
+
+    i_rawlog.open(configuration.rawlogFile);
+
+    cout << "  [INFO] Rawlog file   : " << configuration.rawlogFile << endl;
+    cout << "  [INFO] Labeled scene : " << configuration.labelledScene << endl;
+    loadLabelledScene();
+
+    //
+    // Set output rawlog file
+
+    string o_rawlogFile;
+
+    o_rawlogFile = configuration.rawlogFile.substr(0,configuration.rawlogFile.size()-7);
+    o_rawlogFile += "_labeled.rawlog";
+
+    o_rawlog.open(o_rawlogFile);
+
+    if ( configuration.visualizeLabels )
+        window = mrpt::gui::CDisplayWindowPtr( new mrpt::gui::CDisplayWindow("Labeled depth img"));
+
+    //
+    // Process rawlog
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+
+    cout << "    Process: ";
+    cout.flush();
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+    {
+        // Check that it is a 3D observation
+        if ( !IS_CLASS(obs, CObservation3DRangeScan) )
+            continue;
+
+        // Check if the sensor is being used
+        if ( !sensors_to_use.empty()
+             && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
+             == sensors_to_use.end() )
+            continue;
+
+        // Get obs pose
+        CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+        obs3D->load();
+
+        CPose3D pose;
+        obs3D->getSensorPose( pose );
+        //cout << "Pose [" << obs_index << "]: " << pose << endl;
+
+        size_t rows = obs3D->cameraParams.nrows;
+        size_t cols = obs3D->cameraParams.ncols;
+
+        // Create per pixel labeling
+        // Label size (0=8 bits, 1=16 bits, 2=32 bits, 3=32 bits, 8=64 bits
+        const unsigned int LABEL_SIZE = 2; // 32 bits
+        obs3D->pixelLabels =  CObservation3DRangeScan::TPixelLabelInfoPtr( new CObservation3DRangeScan::TPixelLabelInfo< LABEL_SIZE >() );
+        obs3D->pixelLabels->setSize(rows,cols);
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
+
+        obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
+
+        Eigen::Matrix4f transMat;
+
+        transMat(0,0)=0;    transMat(0,1)=-1;     transMat(0,2)=0;    transMat(0,3)=0;
+        transMat(1,0)=0;    transMat(1,1)=0;      transMat(1,2)=+1;   transMat(1,3)=0;
+        transMat(2,0)=1;    transMat(2,1)=0;      transMat(2,2)=0;    transMat(2,3)=0;
+        transMat(3,0)=0;    transMat(3,1)=0;      transMat(3,2)=0;    transMat(3,3)=1;
+
+        pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
+
+        pcl_cloud->height = 240;
+        pcl_cloud->width = 320;
+
+        //
+        // Label observation
+
+        labelObs( obs3D, pcl_cloud, rows, cols );
+
+        //
+        // Save to output file
+
+        o_rawlog << obs3D;
+
+    }
+
+    i_rawlog.close();
+    o_rawlog.close();
+
+    cout << "  [INFO] Done!" << endl;
+}
+
+//-----------------------------------------------------------
+//
 //                        main
 //
 //-----------------------------------------------------------
@@ -500,177 +698,33 @@ void labelObs(CObservation3DRangeScanPtr obs,
 int main(int argc, char* argv[])
 {
 
+    cout << endl << "-----------------------------------------------------" << endl;
+    cout <<         "                Label rawlog app.                     " << endl;
+    cout <<         "            [Object Labeling Tookit]                 " << endl;
+    cout <<         "-----------------------------------------------------" << endl << endl;
+
     try
     {
+        //mrpt::utils::registerClass(CLASS_ID(CObservation3DRangeScan));
 
+        //
+        // Load parameters
 
-        mrpt::utils::registerClass(CLASS_ID(CObservation3DRangeScan));
+        int res = loadParameters(argc,argv);
 
-        // Useful variables
-
-        vector<string> sensors_to_use;
-        CRawlog rawlog, o_rawlog;
-        bool stepByStepExecution = false;
-        string o_rawlogFile;
-
-        if ( argc > 1 )
-        {
-            // Get configuration file name
-
-            cout << "1:" << argv[1] << endl;
-
-            string configFile = argv[1];
-            loadConfig(configFile);
-
-            // Get optional paramteres
-            if ( argc > 2 )
-            {
-                size_t arg = 2;
-
-                while ( arg < argc )
-                {
-                    if ( !strcmp(argv[arg],"-h") )
-                    {
-                        showUsageInformation();
-                        arg++;
-                    }
-                    if ( !strcmp(argv[arg],"-i") )
-                    {
-                        configuration.rawlogFile = argv[arg+1];
-                        arg += 2;
-                    }
-                    if ( !strcmp(argv[arg],"-l") )
-                    {
-                        configuration.labelledScene = argv[arg+1];
-                        arg += 2;
-                    }
-                    else if ( !strcmp(argv[arg],"-sensor") )
-                    {
-                        string sensor = argv[arg+1];
-                        sensors_to_use.push_back(  sensor );
-                        arg += 2;
-                    }
-                    else if ( !strcmp(argv[arg], "-step") )
-                    {
-                        stepByStepExecution = true;
-                        arg++;
-                    }
-                    else
-                    {
-                        cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
-                        return -1;
-                    }
-
-                }
-            }
-        }
-        else
-        {
-            showUsageInformation();
-
+        if ( res < 0 )
             return -1;
-        }
-
-        if ( sensors_to_use.empty() )
-            cout << "[INFO] Considering observations from any sensor." << endl;
-        else
-        {
-            cout << "[INFO] Considering observations from: ";
-            for ( size_t i_sensor = 0; i_sensor < sensors_to_use.size(); i_sensor++ )
-                cout << sensors_to_use[i_sensor] << " ";
-            cout << endl;
-        }
-
-        o_rawlogFile = configuration.rawlogFile.substr(0,configuration.rawlogFile.size()-7);
-        o_rawlogFile += "_labeled.rawlog";
-
-        rawlog.loadFromRawLogFile( configuration.rawlogFile );
-
-        cout << "[INFO] Rawlog file   : " << configuration.rawlogFile;
-        cout << " with " << rawlog.size() << " obs" << endl;
-        cout << "[INFO] Labeled scene : " << configuration.labelledScene << endl;
-        loadLabelledScene();
-
-        if ( configuration.visualizeLabels )
-            window = mrpt::gui::CDisplayWindowPtr( new mrpt::gui::CDisplayWindow("Labeled depth img"));
 
         //
-        // Iterate over the obs into the rawlog labeling them
-        //
+        // Label rawlog
 
-        for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
-        {
-            CObservationPtr obs = rawlog.getAsObservation(obs_index);
-
-            // Check that it is a 3D observation
-            if ( !IS_CLASS(obs, CObservation3DRangeScan) )
-                continue;
-
-            // Check if the sensor is being used
-            if ( !sensors_to_use.empty()
-                 && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
-                 == sensors_to_use.end() )
-                continue;
-
-            // Get obs pose
-            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-            obs3D->load();
-
-            CPose3D pose;
-            obs3D->getSensorPose( pose );
-            //cout << "Pose [" << obs_index << "]: " << pose << endl;
-
-            size_t rows = obs3D->cameraParams.nrows;
-            size_t cols = obs3D->cameraParams.ncols;
-
-            // Create per pixel labeling
-            // Label size (0=8 bits, 1=16 bits, 2=32 bits, 3=32 bits, 8=64 bits
-            const unsigned int LABEL_SIZE = 2; // 32 bits
-            obs3D->pixelLabels =  CObservation3DRangeScan::TPixelLabelInfoPtr( new CObservation3DRangeScan::TPixelLabelInfo< LABEL_SIZE >() );
-            obs3D->pixelLabels->setSize(rows,cols);
-
-            pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud( new pcl::PointCloud<pcl::PointXYZ>() );
-
-            obs3D->project3DPointsFromDepthImageInto( *pcl_cloud, true );
-
-            Eigen::Matrix4f transMat;
-
-            transMat(0,0)=0;    transMat(0,1)=-1;     transMat(0,2)=0;    transMat(0,3)=0;
-            transMat(1,0)=0;    transMat(1,1)=0;      transMat(1,2)=+1;   transMat(1,3)=0;
-            transMat(2,0)=1;    transMat(2,1)=0;      transMat(2,2)=0;    transMat(2,3)=0;
-            transMat(3,0)=0;    transMat(3,1)=0;      transMat(3,2)=0;    transMat(3,3)=1;
-
-            pcl::transformPointCloud( *pcl_cloud, *pcl_cloud, transMat );
-
-            pcl_cloud->height = 240;
-            pcl_cloud->width = 320;
-
-            //
-            // Label observation
-            //
-
-            cout << "Labeling " << obs_index << " of " << rawlog.size() << '\xd';
-            mrpt::system::sleep(100);
-
-            labelObs( obs3D, pcl_cloud, rows, cols );
-
-            o_rawlog.addObservationMemoryReference(obs3D);
-
-        }
-
-        //
-        //  Save labeled observations to a new rawlog file
-        //
-
-        cout << "[INFO] Saving rawlog file to " << o_rawlogFile << endl;
-        o_rawlog.saveToRawLogFile( o_rawlogFile );
-        cout << "[INFO] Done!" << endl;
+        labelRawlog();
 
         return 0;
 
     } catch (exception &e)
     {
-        cout << "Exception caught: " << e.what() << endl;
+        cout << "  Exception caught: " << e.what() << endl;
         return -1;
     }
     catch (...)

@@ -71,6 +71,7 @@ int decimate = 0;
 bool keepOnlyProcessed = false;
 float removeEmptyObs = 0.0;
 float removeWeirdObs = 0.0;
+bool onlyRemove3DPointClouds;
 
 string replaceSensorLabel;  // Current sensor label
 string replaceSensorLabelAs;// New sensor label
@@ -147,6 +148,7 @@ void showUsageInformation()
             "    -project3DPointClouds: Project 3D point clouds from depth images." << endl <<
             "    -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
             "    -removeWeirdObs <num> : Set to 0 (null) observations with a factor of valid measurements lower than <num>" << endl <<
+            "    -remove3DPointClouds: Remove all the point clouds within RGBD observations."
             "    -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
             "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl << endl;
 }
@@ -926,6 +928,11 @@ int loadParameters(int argc, char* argv[])
                 keepOnlyProcessed = true;
                 cout << "  [INFO] Keeping only processed observations."  << endl;
             }
+            else if ( !strcmp(argv[arg],"-remove3DPointClouds") )
+            {
+                onlyRemove3DPointClouds = true;
+                cout << "  [INFO] Remove 3D point clouds."  << endl;
+            }
             else if ( !strcmp(argv[arg],"-removeEmptyObs") )
             {
                 removeEmptyObs = atof(argv[arg+1]);;
@@ -1187,6 +1194,95 @@ void removeWeirdObservations()
 
 //-----------------------------------------------------------
 //
+//                   removeEmptyObservations
+//
+//-----------------------------------------------------------
+
+void remove3DPointClouds()
+{
+    //
+    // Check input rawlog
+    //
+
+    if (!mrpt::system::fileExists(i_rawlogFilename))
+    {
+        cerr << "  [ERROR] A rawlog file with name " << i_rawlogFilename;
+        cerr << " doesn't exist." << endl;
+        return;
+    }
+
+    CFileGZInputStream i_rawlog(i_rawlogFilename);
+
+    cout << "  [INFO] Processing rawlog " << i_rawlogFilename << endl;
+    cout << "  [INFO] Removing 3D point clouds " << endl;
+
+    string o_rawlogFileName;
+
+    //
+    // Set output rawlog file
+    //
+
+    o_rawlogFileName.assign(i_rawlogFilename.begin(),
+                            i_rawlogFilename.end()-7);
+    o_rawlogFileName += (calibConfig.only2DLaser) ? "_hokuyo" : "";
+    o_rawlogFileName += (calibConfig.onlyRGBD) ? "_rgbd" : "";
+    o_rawlogFileName += "_processed.rawlog";
+
+    CFileGZOutputStream o_rawlog(o_rawlogFileName);
+
+    //
+    // Process rawlog
+    //
+
+    CActionCollectionPtr action;
+    CSensoryFramePtr observations;
+    CObservationPtr obs;
+    size_t obsIndex = 0;
+    size_t pointCloudsRemoved = 0;
+
+    cout << "    Process: ";
+    cout.flush();
+
+    while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
+    {
+        // Show progress as dots
+
+        if ( !(obsIndex % 200) )
+        {
+            if ( !(obsIndex % 1000) ) cout << "+ "; else cout << ". ";
+            cout.flush();
+        }
+
+        if (IS_CLASS(obs, CObservation3DRangeScan))
+        {
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            if ( obs3D->hasPoints3D || obs3D->points3D_x.size() )
+            {
+                obs3D->points3D_x.clear();
+                obs3D->points3D_y.clear();
+                obs3D->points3D_z.clear();
+
+                obs3D->hasPoints3D = false;
+
+                pointCloudsRemoved++;
+            }
+
+            o_rawlog << obs3D;
+        }
+
+
+    }
+
+    cout << endl << "    Number of point clouds removed: "
+         << pointCloudsRemoved << " of " << obsIndex << endl;
+
+    cout << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl << endl;
+}
+
+//-----------------------------------------------------------
+//
 //                          main
 //
 //-----------------------------------------------------------
@@ -1254,6 +1350,9 @@ int main(int argc, char* argv[])
 
         else if ( removeWeirdObs )
             removeWeirdObservations();
+
+        else if ( onlyRemove3DPointClouds )
+            remove3DPointClouds();
 
         else if ( setCalibrationParameters )
             processRawlog();
