@@ -734,7 +734,7 @@ void trajectoryICP2D( string &simpleMapFile,
 
         m2.insertObservationPtr(obs2Daux);
 
-        if (!skip_window)
+        if (!skip_window && visualize2DResults)
         {
             // Reference map:
             vector<float>   map1_xs, map1_ys, map1_zs;
@@ -796,7 +796,7 @@ void trajectoryICP2D( string &simpleMapFile,
         CSimplePointsMap m2_trans = m2;
         m2_trans.changeCoordinatesReference( gPdf.mean );
 
-        if (!skip_window)
+        if (!skip_window && visualize2DResults)
         {
             CMatrixFloat COV22 =  CMatrixFloat( CMatrixDouble( gPdf.cov ));
             COV22.setSize(2,2);

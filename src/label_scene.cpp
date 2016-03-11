@@ -829,7 +829,7 @@ string readStringFromWindow(const string &text, string initial_string="")
 
     while(!done)
     {
-        win3D.addTextMessage(0.02,1-0.06, format("%s %s",text.c_str(),read.c_str()), TColorf(1,1,1),20,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+        win3D.addTextMessage(0.02,1-0.06, format("%s %s",text.c_str(),read.c_str()), TColorf(0,0,1),20,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
         win3D.forceRepaint();
         cout << '\r' << text << read << "                 ";
         cout.flush();
@@ -960,16 +960,19 @@ void addNewBox(string &objectCategory)
             && ( key != 'd' ) )
         key = win3D.waitForKey();
 
+    TPoint3D c1,c2;
+    box->getBoxCorners(c1,c2);
+
     switch (key)
     {
     case 'a':
-            newPose.z(0.2);
+            newPose.z(c2.z);
             break;
     case 's':
-            newPose.z(0.75);
+            newPose.z(c2.z + 0.75);
             break;
     case 'd':
-            newPose.z(1.5);
+            newPose.z(c2.z + 1.2);
             break;
     }
 
@@ -977,6 +980,7 @@ void addNewBox(string &objectCategory)
 
     box->setPose(newPose);
     win3D.forceRepaint();
+    win3D.clearKeyHitFlag();
 
     v_boxes.push_back( box );
     v_labels.push_back( text );
@@ -1190,29 +1194,43 @@ void labelScene()
 
                 case ( MRPTK_LEFT ) : // y axis left
                 {
-                    CPose3D move(0,OFFSET,0,0,0,0);
-                    box->setPose(move+boxPose);
+                    CPose3D cameraPose;
+                    win3D.getDefaultViewport()->getCurrentCameraPose(cameraPose);
+                    CPose3D move(-OFFSET,0,0,0,0);
+                    CPose3D p1 = -cameraPose+boxPose;
+                    box->setPose(cameraPose+(move+p1));
 
                     break;
                 }
                 case ( MRPTK_DOWN ) : // x axis down
                 {
-                    CPose3D move(-OFFSET,0,0,0,0,0);
-                    box->setPose(move+boxPose);
+                    CPose3D cameraPose;
+                    win3D.getDefaultViewport()->getCurrentCameraPose(cameraPose);
+                    cameraPose.setYawPitchRoll(cameraPose.yaw(),cameraPose.pitch(),0);
+                    CPose3D move(0,-OFFSET,0,0,0,0);
+                    CPose3D p1 = -cameraPose+boxPose;
+                    box->setPose(cameraPose+(move+p1));
 
                     break;
                 }
                 case ( MRPTK_RIGHT ) : // y axis right
                 {
-                    CPose3D move(0,-OFFSET,0,0,0,0);
-                    box->setPose(move+boxPose);
+                    CPose3D cameraPose;
+                    win3D.getDefaultViewport()->getCurrentCameraPose(cameraPose);
+                    CPose3D move(OFFSET,0,0,0,0,0);
+                    CPose3D p1 = -cameraPose+boxPose;
+                    box->setPose(cameraPose+(move+p1));
 
                     break;
                 }
                 case ( MRPTK_UP ) : // x axis up
                 {
-                    CPose3D move(OFFSET,0,0,0,0,0);
-                    box->setPose(move+boxPose);
+                    CPose3D cameraPose;
+                    win3D.getDefaultViewport()->getCurrentCameraPose(cameraPose);
+                    cameraPose.setYawPitchRoll(cameraPose.yaw(),cameraPose.pitch(),0);
+                    CPose3D move(0,OFFSET,0,0,0,0);
+                    CPose3D p1 = -cameraPose+boxPose;
+                    box->setPose(cameraPose+(move+p1));
 
                     break;
                 }
