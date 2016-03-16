@@ -665,7 +665,7 @@ void changeUnderlyingPointCloud()
 
 void showIDLEMenu()
 {
-    win3D.addTextMessage(0.02,0.06+0.03*1, "[Actions] 'b': list boxes 'n': new box 'e': edit box 'd': delete box", TColorf(1,1,1),10,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*1, "[Actions] 'l': show/hide list boxes 'n': new box 'e': edit box 'd': delete box", TColorf(1,1,1),10,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*0, "          'c': change underlying scene 's': save scene 'v': change visualization 'esc': exit", TColorf(1,1,1),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*2, "", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*3, "", TColorf(1,1,1),13,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
@@ -829,7 +829,7 @@ string readStringFromWindow(const string &text, string initial_string="")
 
     while(!done)
     {
-        win3D.addTextMessage(0.02,1-0.06, format("%s %s",text.c_str(),read.c_str()), TColorf(0,0,1),20,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+        win3D.addTextMessage(0.02,1-0.04, format("%s %s",text.c_str(),read.c_str()), TColorf(0,1,1),20,MRPT_GLUT_BITMAP_TIMES_ROMAN_24 );
         win3D.forceRepaint();
         cout << '\r' << text << read << "                 ";
         cout.flush();
@@ -1004,6 +1004,7 @@ void labelScene()
     string objectCategory;
 
     bool end = false;
+    bool shownListOfBoxes = false;
 
     while ( win3D.isOpen() && !end )
     {
@@ -1047,25 +1048,69 @@ void labelScene()
 
                     break;
                 }
-                case ('b') :
+                case ('l') :
                 {
-                    cout << "  [INFO] Showing list of stored boxes" << endl;
-
                     if ( !v_boxes.size() )
-                        cout << "No boxes stored" << endl;
+                        cout << "    No boxes stored" << endl;
 
                     for ( size_t box_index = 0; box_index < v_boxes.size(); box_index++ )
-                        cout << "Index " << box_index
-                             << " name " << v_boxes[box_index]->getName()
-                             << endl;
+                    {
+                        if ( !shownListOfBoxes )
+                        {
+                            cout << "    Index " << box_index
+                                 << " name " << v_boxes[box_index]->getName()
+                                 << endl;
+
+                            if ( box_index < 35 )
+                                win3D.addTextMessage(0.02,1-0.07-0.02*box_index,format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+                            else
+                                win3D.addTextMessage(1-0.12,1-0.07-0.02*(box_index-35),format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+                        }
+                        else
+                            win3D.addTextMessage(0.02,1-0.06-0.02*box_index,"", TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+                    }
+
+                    if ( !shownListOfBoxes )
+                        cout << "  [INFO] Showing list of stored boxes" << endl;
+                    else
+                        cout << "  [INFO] Hiding list of stored boxes" << endl;
+
+                    shownListOfBoxes = !shownListOfBoxes;
+                    win3D.forceRepaint();
 
                     break;
                 }
                 case ('e') :
                 {
                     size_t box_index;
-                    cout << "Insert the box index to edit ";
-                    cin >> box_index;
+
+                    string boxToEdit = readStringFromWindow("    Insert the box index or label to edit: ");
+
+                    // Check if it's a number
+                    if ( strspn( boxToEdit.c_str(), "0123456789" ) == boxToEdit.size() )
+                        box_index = atoi(boxToEdit.c_str());
+                    else // It's the label of a box
+                    {
+                        bool found = false;
+                        size_t index = 0;
+
+                        while (!found && (index < v_boxes.size()) )
+                        {
+                            if ( boxToEdit == v_boxes[index]->getName() )
+                            {
+                                found = true;
+                                box_index = index;
+                            }
+                            else
+                                index++;
+                        }
+
+                        if ( !found )
+                        {
+                            cout << "    Invalid box label. Press 'b' to see a list of the stored boxes." << endl;
+                            break;
+                        }
+                    }
 
                     if ( box_index >= 0 && box_index < v_boxes.size() )
                     {
@@ -1074,7 +1119,7 @@ void labelScene()
                         cout << "  [INFO] editin box with index " << box_editing << endl;
                     }
                     else
-                        cout << "Invalid box index. Press 'b' to see a list of the stored boxes." << endl;
+                        cout << "    Invalid box index. Press 'b' to see a list of the stored boxes." << endl;
 
                     break;
                 }
@@ -1132,13 +1177,11 @@ void labelScene()
                 }
                 case (MRPTK_ESCAPE) :
                 {
-                    char option;
-                    cout << "  [INFO] Exiting, are you sure? (y/n): ";
-                    cin >> option;
+                    string option = readStringFromWindow("    Exiting, are you sure? (y/n): ");
 
-                    if ( option == 'y' )
+                    if ( option == "y" )
                     {
-                        cout << "Bye!" << endl;
+                        cout << endl;
                         end = true;
                     }
 
