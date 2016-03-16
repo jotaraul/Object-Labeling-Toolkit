@@ -173,11 +173,11 @@ else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
         TARGET_LINK_LIBRARIES(Process_rawlog ${OpenCV_LIBS} ${PCL_LIBRARIES} ${MRPT_LIBS} )
 endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
-ADD_EXECUTABLE(Localize_sensors ${CMAKE_SOURCE_DIR}/src/localization.cpp)
-TARGET_LINK_LIBRARIES(Localize_sensors ${PCL_LIBRARIES} ${MRPT_LIBS} DIFODO )
+ADD_EXECUTABLE(Mapping ${CMAKE_SOURCE_DIR}/src/mapping.cpp)
+TARGET_LINK_LIBRARIES(Mapping ${PCL_LIBRARIES} ${MRPT_LIBS} DIFODO )
 
-ADD_EXECUTABLE(Sequential_visualization ${CMAKE_SOURCE_DIR}/src/sequential_visualization.cpp)
-TARGET_LINK_LIBRARIES(Sequential_visualization ${PCL_LIBRARIES} ${MRPT_LIBS} )
+ADD_EXECUTABLE(Visualize_reconstruction ${CMAKE_SOURCE_DIR}/src/visualize_reconstruction.cpp)
+TARGET_LINK_LIBRARIES(Visualize_reconstruction ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
 ADD_EXECUTABLE(Label_scene ${CMAKE_SOURCE_DIR}/src/label_scene.cpp)
 TARGET_LINK_LIBRARIES(Label_scene ${PCL_LIBRARIES} ${MRPT_LIBS} )

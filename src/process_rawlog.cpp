@@ -144,6 +144,7 @@ void showUsageInformation()
             "    -config        : Configuration file." << endl <<
             "    -h             : Shows this help." << endl <<
             "    -only_hokuyo   : Process only hokuyo observations." << endl <<
+            "    -only_rgbd     : Process only RGB-D observations." << endl  <<
             "    -replaceLabel <l1> <l2>: Replace observations with label <l1> by label <l2>." << endl <<
             "    -project3DPointClouds: Project 3D point clouds from depth images." << endl <<
             "    -removeEmptyObs <num> : Remove empty (depth) observations with a factor of null measurments higher than <num>" << endl <<
@@ -657,6 +658,9 @@ void processRawlog()
 
         if ( obs->sensorLabel == "HOKUYO1" )
         {
+            if ( calibConfig.onlyRGBD )
+                continue;
+
             CObservation2DRangeScanPtr obs2D = CObservation2DRangeScanPtr(obs);
             obs2D->load();
 
@@ -712,13 +716,6 @@ void processRawlog()
                     // Undistort Depth image
                     Eigen::MatrixXf depthMatrix = obs3D->rangeImage;
                     v_RGBD_sensors[RGBD_sensorIndex].depth_intrinsic_model.undistort(&depthMatrix);
-//                    cout << "-----------------------------------------------" << endl;
-//                    cout << "ROws: " << depthMatrix.rows() << " cols: " << depthMatrix.cols() << endl;
-//                    cout << "-----------------------------------------------" << endl;
-//                    cout << "ROws: " << obs3D->rangeImage.rows() << " cols: " << obs3D->rangeImage.cols() << endl;
-//                    cout << obs3D->rangeImage << endl;
-
-//                    system::pause();
 
                     obs3D->rangeImage = depthMatrix;
                 }
