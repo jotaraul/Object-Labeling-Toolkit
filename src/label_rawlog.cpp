@@ -125,6 +125,7 @@ void showUsageInformation()
             " \t <conf_fil>       : Configuration file." << endl;
     cout << "Then, optional parameters:" << endl <<
             " \t -h                     : This help." << endl <<
+            " \t -config <file>         : Configuration file to be loaded." << endl <<
             " \t -i <rawlog_file>       : Rawlog file to process." << endl <<
             " \t -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
             " \t -step                  : Enable step by step execution." << endl;
@@ -551,6 +552,7 @@ int loadParameters(int argc, char* argv[])
             else
             {
                 cout << "  [Error] " << argv[arg] << " unknown paramter" << endl;
+                showUsageInformation();
                 return -1;
             }
 
@@ -608,7 +610,7 @@ void labelRawlog()
     string o_rawlogFile;
 
     o_rawlogFile = configuration.rawlogFile.substr(0,configuration.rawlogFile.size()-7);
-    o_rawlogFile += "_labeled.rawlog";
+    o_rawlogFile += "_labelled.rawlog";
 
     o_rawlog.open(o_rawlogFile);
 
@@ -623,7 +625,6 @@ void labelRawlog()
     CObservationPtr obs;
     size_t obsIndex = 0;
 
-    cout << "    Process: ";
     cout.flush();
 
     while ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,observations,obs,obsIndex) )
@@ -631,6 +632,9 @@ void labelRawlog()
         // Check that it is a 3D observation
         if ( !IS_CLASS(obs, CObservation3DRangeScan) )
             continue;
+
+        cout << "\r" << "    Process: " << obsIndex;
+        cout.flush();
 
         // Check if the sensor is being used
         if ( !sensors_to_use.empty()
@@ -686,7 +690,7 @@ void labelRawlog()
     i_rawlog.close();
     o_rawlog.close();
 
-    cout << "  [INFO] Done!" << endl;
+    cout << endl << "  [INFO] Done!" << endl << endl;
 }
 
 //-----------------------------------------------------------

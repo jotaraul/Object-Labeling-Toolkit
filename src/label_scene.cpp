@@ -613,20 +613,27 @@ void changeUnderlyingPointCloud()
     if ( newSceneFile[newSceneFile.size()-1] == '\'' )
         newSceneFile = newSceneFile.substr(0,newSceneFile.size()-1);
 
-    cout << "  [INFO] Checking if " << newSceneFile << " is a valid scene file ..." ;
+    cout << "  [INFO] Checking if '" << newSceneFile << "' is a valid scene file ..." ;
 
     mrpt::opengl::COpenGLScene sceneBis;
 
-    if ( ( newSceneFile.compare(newSceneFile.size()-15,15,"_labelled.scene") )
-         && sceneBis.loadFromFile(newSceneFile) )
+    if ( newSceneFile.compare(newSceneFile.size()-15,15,"_labelled.scene") )
     {
-        cout << " valid :)" << endl;
-        sceneFile = newSceneFile;
-        sceneFileToSave = sceneFile.substr(0,sceneFile.size()-6) + "_labelled.scene";
+        if ( sceneBis.loadFromFile(newSceneFile) )
+        {
+            cout << " valid :)" << endl;
+            sceneFile = newSceneFile;
+            sceneFileToSave = sceneFile.substr(0,sceneFile.size()-6) + "_labelled.scene";
+        }
+        else
+        {
+            cout << " invalid :( unable to load the scene" << endl;
+            return;
+        }
     }
     else
     {
-        cout << " invalid :(" << endl;
+        cout << " invalid :( the scene must be not labelled yet!" << endl;
         return;
     }
 
@@ -861,6 +868,61 @@ string readStringFromWindow(const string &text, string initial_string="")
     return read;
 }
 
+
+//-----------------------------------------------------------
+//
+//                    updateListOfBoxes
+//
+//-----------------------------------------------------------
+
+void updateVisualListOfBoxes(bool changeState=true)
+{
+    static bool shownListOfBoxes = false;
+
+    if ( changeState )
+        shownListOfBoxes = !shownListOfBoxes;
+
+    if ( !v_boxes.size() )
+        cout << "    No boxes stored" << endl;
+
+    for ( size_t box_index = 0; box_index < v_boxes.size(); box_index++ )
+    {
+        if ( shownListOfBoxes )
+        {
+            if ( changeState )
+            {
+                cout << "    Index " << box_index
+                 << " name " << v_boxes[box_index]->getName()
+                 << endl;
+            }
+
+            if ( box_index < 35 )
+                win3D.addTextMessage(0.02,1-0.08-0.02*box_index,format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+            else
+                win3D.addTextMessage(1-0.12,1-0.08-0.02*(box_index-35),format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+        }
+        else
+            win3D.addTextMessage(0.02,1-0.08-0.02*box_index,"", TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    }
+
+    if (changeState)
+    {
+        if ( shownListOfBoxes )
+            cout << "  [INFO] Showing list of stored boxes" << endl;
+        else
+            cout << "  [INFO] Hiding list of stored boxes" << endl;
+    }
+
+    win3D.forceRepaint();
+}
+
+
+//-----------------------------------------------------------
+//
+//                         addNewBox
+//
+//-----------------------------------------------------------
+
 void addNewBox(string &objectCategory)
 {
     // Get category name
@@ -883,7 +945,7 @@ void addNewBox(string &objectCategory)
         }
         else// New category
         {
-            cout << "  [INFO] New object category!" << endl;
+            cout << "  [INFO] New object category! '" << cat << "'" << endl;
             box = opengl::CBox::Create(TPoint3D(-0.05,-0.1,-0.1),TPoint3D(0.1,0.1,0.1) );
         }
 
@@ -987,7 +1049,10 @@ void addNewBox(string &objectCategory)
 
     changeState(EDITING);
     box_editing = v_boxes.size()-1;
+
+    updateVisualListOfBoxes(false);
 }
+
 
 //-----------------------------------------------------------
 //
@@ -1004,7 +1069,6 @@ void labelScene()
     string objectCategory;
 
     bool end = false;
-    bool shownListOfBoxes = false;
 
     while ( win3D.isOpen() && !end )
     {
@@ -1025,7 +1089,7 @@ void labelScene()
         scene->insert( sphere5 );
         scene->insert( sphere6 );
         scene->insert( sphere7 );
-        scene->insert( sphere8 );
+        scene->insert( sphere8 );labelScene
 
         CSpherePtr sphereTest = CSphere::Create(0.05);
         sphereTest->setLocation(1,0,0);
@@ -1050,33 +1114,7 @@ void labelScene()
                 }
                 case ('l') :
                 {
-                    if ( !v_boxes.size() )
-                        cout << "    No boxes stored" << endl;
-
-                    for ( size_t box_index = 0; box_index < v_boxes.size(); box_index++ )
-                    {
-                        if ( !shownListOfBoxes )
-                        {
-                            cout << "    Index " << box_index
-                                 << " name " << v_boxes[box_index]->getName()
-                                 << endl;
-
-                            if ( box_index < 35 )
-                                win3D.addTextMessage(0.02,1-0.07-0.02*box_index,format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
-                            else
-                                win3D.addTextMessage(1-0.12,1-0.07-0.02*(box_index-35),format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
-                        }
-                        else
-                            win3D.addTextMessage(0.02,1-0.06-0.02*box_index,"", TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
-                    }
-
-                    if ( !shownListOfBoxes )
-                        cout << "  [INFO] Showing list of stored boxes" << endl;
-                    else
-                        cout << "  [INFO] Hiding list of stored boxes" << endl;
-
-                    shownListOfBoxes = !shownListOfBoxes;
-                    win3D.forceRepaint();
+                    updateVisualListOfBoxes();
 
                     break;
                 }
@@ -1172,6 +1210,8 @@ void labelScene()
                     }
                     else
                         cout << "  [INFO] Error, invalid box index. Press 'b' to see the list of tracked boxes" << endl;
+
+                    updateVisualListOfBoxes(false);
 
                     break;
                 }
@@ -1396,7 +1436,7 @@ void labelScene()
                 }
                 case ('6') : // Decrease size in z
                 {
-                    box->setBoxCorners(c1+TPoint3D(0,0,OFFSET/2),c2-TPoint3D(0,0,OFFSET/2));
+                    box->setBoxCorners(c1,c2-TPoint3D(0,0,OFFSET/2));
 
                     break;
                 }
@@ -1409,6 +1449,8 @@ void labelScene()
                     label->setScale(0.06);
 
                     box->setName(boxLabel);
+
+                    updateVisualListOfBoxes(false);
 
                     break;
                 }

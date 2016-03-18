@@ -4,7 +4,7 @@
 #            A set of software components for the management and            #
 #                      labeling of RGB-D datasets                           #
 #                                                                           #
-#              Copyright (C) 2015 Jose Raul Ruiz Sarmiento                  #
+#            Copyright (C) 2015-2016 Jose Raul Ruiz Sarmiento               #
 #                 University of Malaga <jotaraul@uma.es>                    #
 #             MAPIR Group: <http://http://mapir.isa.uma.es/>                #
 #                                                                           #
@@ -22,7 +22,7 @@
 #---------------------------------------------------------------------------#
 
 # Project name	
-PROJECT(HOMe-toolkit)
+PROJECT(OLT)
 
 # Required commands in newer CMake versions:
 CMAKE_MINIMUM_REQUIRED(VERSION 2.4)

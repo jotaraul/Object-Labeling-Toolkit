@@ -60,6 +60,7 @@ gui::CDisplayWindowPlotsPtr	win;
 
 // Configuration vbles
 string             i_rawlogFileName; // Rawlog file name
+string             i_sceneFilename; // Rawlog file name
 CFileGZInputStream i_rawlog; // Rawlog file stream
 bool stepByStepExecution = false; // Enables step by step execution
 bool clearAfterStep = false;
@@ -84,7 +85,7 @@ bool visualize2Dposes = false;
 void showUsageInformation()
 {
     cout << "  Usage information. At least one expected argument: " << endl <<
-            "    (1) Rawlog file." << endl;
+            "    (1) Rawlog or scene file." << endl;
 
     cout << "  Then, optional parameters:" << endl <<
             "    -sensor <sensor_label> : Use obs. from this sensor (all used by default)." << endl <<
@@ -114,7 +115,14 @@ int loadParameters(int argc, char* argv[])
     if ( argc > 1 )
     {
         // Get rawlog file name
-        i_rawlogFileName = argv[1];
+        string fileName = argv[1];
+
+        if ( !fileName.compare(fileName.size()-7,7,".rawlog") )
+            i_rawlogFileName = fileName;
+        else if ( !fileName.compare(fileName.size()-6,6,".scene") )
+            i_sceneFilename = fileName;
+        else
+            return -1;
 
         // Get optional paramteres
         if ( argc > 2 )
@@ -231,6 +239,40 @@ int loadParameters(int argc, char* argv[])
 
 void visualizeScene()
 {
+    if (!mrpt::system::fileExists(i_sceneFilename))
+    {
+        cout << "  [ERROR] Couldn't open scene dataset file " <<
+                i_sceneFilename << endl;
+        return;
+    }
+
+    // Get scene name
+    vector<string> tokens;
+    mrpt::system::tokenize(i_sceneFilename,"/",tokens);
+
+    win3D = gui::CDisplayWindow3DPtr( new gui::CDisplayWindow3D() );
+    win3D->setWindowTitle(format("Visualizing %s",tokens[tokens.size()-1].c_str()));
+
+    scene = win3D->get3DSceneAndLock();
+
+    if (scene->loadFromFile(i_sceneFilename))
+        cout << "  [INFO] Scene " << i_sceneFilename << " loaded" << endl;
+    else
+        cout << "  [INFO] Error while loading scene " << i_sceneFilename << endl;
+
+    win3D->unlockAccess3DScene();
+    win3D->forceRepaint();
+}
+
+
+//-----------------------------------------------------------
+//
+//                       buildScene
+//
+//-----------------------------------------------------------
+
+void buildScene()
+{
     //
     //  Check the input rawlog file
 
@@ -263,7 +305,7 @@ void visualizeScene()
     mrpt::system::tokenize(i_rawlogFileName,"/",tokens);
 
     win3D = gui::CDisplayWindow3DPtr( new gui::CDisplayWindow3D() );
-    win3D->setWindowTitle(format("Sequential visualization of %s",tokens[tokens.size()-1].c_str()));
+    win3D->setWindowTitle(format("Building reconstruction visualization of %s",tokens[tokens.size()-1].c_str()));
 
     win3D->resize(400,300);
 
@@ -471,23 +513,33 @@ int main(int argc, char* argv[])
         //
         // Visualize scene
 
-        visualizeScene();        
-
-        //
-        // Decide if save the scene or not
-
-        if ( !win3D.null() )
+        if ( !i_rawlogFileName.empty() )
         {
-            cout << "  [INFO] Press 's' to save the scene or other key to end the program." << endl;
-            while ( win3D->isOpen() && !win3D->keyHit() )
-                mrpt::system::sleep(10);
-
-            int key = win3D->getPushedKey();
+            buildScene();
 
             //
-            // Save the built scene to file
-            if (( key == 's' ) || ( key == 'S'))
-                saveSceneToFile();
+            // Decide if save the scene or not
+
+            if ( !win3D.null() )
+            {
+                cout << "  [INFO] Press 's' to save the scene or other key to end the program." << endl;
+                while ( win3D->isOpen() && !win3D->keyHit() )
+                    mrpt::system::sleep(10);
+
+                int key = win3D->getPushedKey();
+
+                //
+                // Save the built scene to file
+                if (( key == 's' ) || ( key == 'S'))
+                    saveSceneToFile();
+            }
+        }
+        else if ( !i_sceneFilename.empty() )
+        {
+            visualizeScene();
+
+            while ( win3D->isOpen() && !win3D->keyHit() )
+                mrpt::system::sleep(10);
         }
 
         return 0;
