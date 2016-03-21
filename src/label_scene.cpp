@@ -54,11 +54,13 @@ struct TConfiguration
     double OFFSET;
     double OFFSET_ANGLES;
     string sceneFile;
+    bool autoLabelInstances;
 
     bool showOnlyLabels;
 
 
-    TConfiguration() : OFFSET(0.02), OFFSET_ANGLES(0.02), showOnlyLabels(false)
+    TConfiguration() : OFFSET(0.02), OFFSET_ANGLES(0.02), showOnlyLabels(false),
+        autoLabelInstances(true)
     {}
 };
 
@@ -120,6 +122,9 @@ void loadConfig( string const configFile )
 
     configuration.showOnlyLabels = config.read_bool("GENERAL","showOnlyLabels",0,true);
     configuration.sceneFile      = config.read_string("GENERAL","sceneFile","",true);
+
+    configuration.OFFSET         = config.read_float("GENERAL","OFFSET",0,true);
+    configuration.OFFSET_ANGLES  = config.read_float("GENERAL","OFFSET_ANGLES",0,true);
 
 
     // Load object labels (classes) to be considered
@@ -825,6 +830,19 @@ void initializeVisualization()
 
 //-----------------------------------------------------------
 //
+//                     showStatusMessage
+//
+//-----------------------------------------------------------
+
+void showStatusMessage(const string &text)
+{
+    win3D.addTextMessage(0.02,1-0.04, format("%s",text.c_str()), TColorf(1,0,1),20,MRPT_GLUT_BITMAP_TIMES_ROMAN_24 );
+    win3D.forceRepaint();
+}
+
+
+//-----------------------------------------------------------
+//
 //                     readStringFromWindow
 //
 //-----------------------------------------------------------
@@ -897,12 +915,12 @@ void updateVisualListOfBoxes(bool changeState=true)
             }
 
             if ( box_index < 35 )
-                win3D.addTextMessage(0.02,1-0.08-0.02*box_index,format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+                win3D.addTextMessage(0.02,1-0.09-0.02*box_index,format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
             else
-                win3D.addTextMessage(1-0.12,1-0.08-0.02*(box_index-35),format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+                win3D.addTextMessage(1-0.12,1-0.09-0.02*(box_index-35),format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
         }
         else
-            win3D.addTextMessage(0.02,1-0.08-0.02*box_index,"", TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+            win3D.addTextMessage(0.02,1-0.09-0.02*box_index,"", TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     }
 
     if (changeState)
@@ -930,6 +948,7 @@ void addNewBox(string &objectCategory)
     cout.flush();
 
     opengl::CBoxPtr box;
+    opengl::CText3DPtr text = opengl::CText3D::Create();
 
     if ( !cat.empty() )
     {
@@ -950,11 +969,38 @@ void addNewBox(string &objectCategory)
         }
 
         objectCategory = cat;
+
+        //getInstanceLabel(cat);
+
+        if ( configuration.autoLabelInstances )
+        {
+            size_t id = 0;
+            bool alreadyExists = true;
+
+            while ( alreadyExists )
+            {
+                alreadyExists = false;
+
+                for ( size_t i_box = 0; i_box < v_boxes.size(); i_box++)
+                {
+                    if (!(format("%s_%lu",cat.c_str(),id).compare(v_boxes[i_box]->getName())))
+                    {
+                        alreadyExists = true;
+                        id++;
+                        break;
+                    }
+                }
+            }
+            text->setString( format("%s_%lu",cat.c_str(),id) );
+            text->setScale(0.06);
+            box->setName( format("%s_%lu",cat.c_str(),id) );
+        }
     }
     else
     {
         //opengl::CBoxPtr box = opengl::CBox::Create(TPoint3D(-0.1,-0.2,-0.2),TPoint3D(0.2,0.2,0.2) );
-        box = opengl::CBox::Create(TPoint3D(-0.05,-0.1,-0.1),TPoint3D(0.1,0.1,0.1) );
+        box = opengl::CBox::Create(TPoint3D(-0.05,-0.1,-0.1),TPoint3D(0.1,0.1,0.1) );        
+        text->setString( box->getName() );
     }
 
     box->setWireframe();
@@ -962,9 +1008,6 @@ void addNewBox(string &objectCategory)
 
     win3D.addTextMessage(0.02,0.06+0.03*2, "Adding bounding box. Move the mouse to the object centroid in the XY plane and press any key.", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.forceRepaint();
-
-    opengl::CText3DPtr text = opengl::CText3D::Create();
-    text->setString( box->getName() );
 
     mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
 
@@ -1166,12 +1209,23 @@ void labelScene()
                     cout << "  [INFO] Saving scene to " << sceneFileToSave << " ... ";
                     cout.flush();
 
+                    showStatusMessage("Saving scene...");
+
                     if ( scene->saveToFile(sceneFileToSave) )
+                    {
                         cout << "done" << endl;
+                        showStatusMessage("Saving scene... DONE!");
+                    }
                     else
+                    {
                         cout << "error" << endl;
+                        showStatusMessage("Saving scene... ERROR!");
+                    }
 
                     saveCategoryFeat();
+
+                    mrpt::system::sleep(2000);
+                    showStatusMessage("");
 
                     break;
                 }
