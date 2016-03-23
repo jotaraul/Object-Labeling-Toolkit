@@ -497,9 +497,10 @@ TPoint3D getColor( const string label )
 //
 //-----------------------------------------------------------
 
-void changeBoxesVisualization()
+void changeBoxesVisualization(bool keepVisualizationMode = false)
 {
-    visualization_mode++;
+    if (!keepVisualizationMode)
+        visualization_mode++;
 
     for ( size_t i = 0; i < v_boxes.size(); i++ )
     {
@@ -677,8 +678,8 @@ void changeUnderlyingPointCloud()
 
 void showIDLEMenu()
 {
-    win3D.addTextMessage(0.02,0.06+0.03*1, "[Actions] 'l': show/hide list boxes 'n': new box 'e': edit box 'd': delete box", TColorf(1,1,1),10,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
-    win3D.addTextMessage(0.02,0.06+0.03*0, "          'c': change underlying scene 's': save scene 'v': change visualization 'esc': exit", TColorf(1,1,1),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*1, "[Actions] 'l': show/hide list boxes 'n': new box 'e': edit box 'd': delete box", TColorf(1,1,0),10,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*0, "          'c': change underlying scene 's': save scene 'v': change visualization 'esc': exit", TColorf(1,1,0),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*2, "", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*3, "", TColorf(1,1,1),13,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*4, "", TColorf(1,1,1),14,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
@@ -693,10 +694,10 @@ void showIDLEMenu()
 
 void showEDITINGMenu()
 {
-    win3D.addTextMessage(0.02,0.06+0.03*0, "[Rot]   'Ins': +yaw 'Del': -yaw 'Home': +pitch 'End': -pitch 'Pag-up': +roll 'Pag-down': -roll", TColorf(1,1,1),10,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
-    win3D.addTextMessage(0.02,0.06+0.03*1, "[Moves] 'up': +x 'down': -x 'left': +y 'right': -y '1': +z '0': -z", TColorf(1,1,1),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
-    win3D.addTextMessage(0.02,0.06+0.03*2, "[Size]  '7': +x '4': -x '8': +y '5': -y '9': +z '6': -z", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
-    win3D.addTextMessage(0.02,0.06+0.03*3, "[Misc]  'l': label 'r': reset 'enter': finish editing", TColorf(1,1,1),13,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*0, "[Rot]   'Ins': +yaw 'Del': -yaw 'Home': +pitch 'End': -pitch 'Pag-up': +roll 'Pag-down': -roll", TColorf(1,1,0),10,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*1, "[Moves] 'up': +x 'down': -x 'left': +y 'right': -y '1': +z '0': -z", TColorf(1,1,0),11,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*2, "[Size]  '7': +x '4': -x '8': +y '5': -y '9': +z '6': -z", TColorf(1,1,0),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+    win3D.addTextMessage(0.02,0.06+0.03*3, "[Misc]  'l': label 'r': reset 'enter': finish editing", TColorf(1,1,0),13,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.addTextMessage(0.02,0.06+0.03*4, "", TColorf(1,1,1),14,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
 }
 
@@ -914,10 +915,10 @@ void updateVisualListOfBoxes(bool changeState=true)
                  << endl;
             }
 
-            if ( box_index < 35 )
+            if ( box_index < 38 )
                 win3D.addTextMessage(0.02,1-0.09-0.02*box_index,format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
             else
-                win3D.addTextMessage(1-0.12,1-0.09-0.02*(box_index-35),format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+                win3D.addTextMessage(1-0.12,1-0.09-0.02*(box_index-38),format("Index %lu %s",box_index,v_boxes[box_index]->getName().c_str()), TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
         }
         else
             win3D.addTextMessage(0.02,1-0.09-0.02*box_index,"", TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
@@ -1003,16 +1004,14 @@ void addNewBox(string &objectCategory)
         text->setString( box->getName() );
     }
 
-    box->setWireframe();
-    box->setLineWidth(5);
-
     win3D.addTextMessage(0.02,0.06+0.03*2, "Adding bounding box. Move the mouse to the object centroid in the XY plane and press any key.", TColorf(1,1,1),12,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     win3D.forceRepaint();
 
     mrpt::opengl::COpenGLScenePtr scene = win3D.get3DSceneAndLock();
 
-    scene->insert( box );
+    box->setLineWidth(5);
 
+    scene->insert( box );
     scene->insert( text );
 
     win3D.unlockAccess3DScene();
@@ -1089,6 +1088,9 @@ void addNewBox(string &objectCategory)
 
     v_boxes.push_back( box );
     v_labels.push_back( text );
+
+    // Update visualization
+    changeBoxesVisualization(true);
 
     changeState(EDITING);
     box_editing = v_boxes.size()-1;
