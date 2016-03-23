@@ -924,6 +924,8 @@ void updateVisualListOfBoxes(bool changeState=true)
             win3D.addTextMessage(0.02,1-0.09-0.02*box_index,"", TColorf(0,1,1),50+box_index,MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
     }
 
+    win3D.addTextMessage(0.02,1-0.09-0.02*v_boxes.size(),"", TColorf(0,1,1),50+v_boxes.size(),MRPT_GLUT_BITMAP_TIMES_ROMAN_10 );
+
     if (changeState)
     {
         if ( shownListOfBoxes )
