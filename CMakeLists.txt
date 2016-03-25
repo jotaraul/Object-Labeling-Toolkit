@@ -57,13 +57,6 @@ endif(PCL_FOUND)
 #message(PCL_LIBS: ${PCL_LIBRARIES})
 
 # --------------------------------------------
-# OpenCV
-# --------------------------------------------
-
-find_package( OpenCV REQUIRED )
-#INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
-
-# --------------------------------------------
 # Third party
 # --------------------------------------------
 
@@ -118,6 +111,9 @@ set(CMAKE_DEBUG_POSTFIX  "-dbg")
 #	LINK_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}")
 #ENDIF(UNIX)
 
+#------------------------------------------------------------------------------#
+#                     Using CLAMS intrinsic calibration?
+#------------------------------------------------------------------------------#
 
 set(OLT_USING_CLAMS_INTRINSIC_CALIBRATION "FALSE" CACHE BOOL
   "Check if an intrinsic calibration by CLAMS of the RGB-D sensors within the dataset is available.")
@@ -144,13 +140,6 @@ if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 		${CLAMS_DISCRETE_DEPTH_DISTORTION_MODEL_SOURCE}
 	)
 
-
-	# Create the undistort library
-	#ADD_LIBRARY(Undistort
-	#		./third_party/CLAMS/include/clams/discrete_depth_distortion_model.h
-	#		./third_party/CLAMS/discrete_depth_distortion_model.cpp
-	#)
-
 	TARGET_LINK_LIBRARIES(Undistort libboost_system.so libboost_thread.so)
 
 	# Tell CMake that the linker language is C++
@@ -168,9 +157,9 @@ endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/src/process_rawlog.cpp)
 
 if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
-        TARGET_LINK_LIBRARIES(Process_rawlog ${OpenCV_LIBS} ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
+        TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
 else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
-        TARGET_LINK_LIBRARIES(Process_rawlog ${OpenCV_LIBS} ${PCL_LIBRARIES} ${MRPT_LIBS} )
+        TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} )
 endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
 ADD_EXECUTABLE(Mapping ${CMAKE_SOURCE_DIR}/src/mapping.cpp)
@@ -208,10 +197,4 @@ TARGET_LINK_LIBRARIES(Calibrate ${PCL_LIBRARIES} ${MRPT_LIBS} )
 IF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
 	MESSAGE(STATUS "Compiler flags: " ${CMAKE_CXX_FLAGS_RELEASE})
 ENDIF(CMAKE_COMPILER_IS_GNUCXX AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
-
-#MESSAGE(STATUS "OpenCV libraries: " ${OpenCV_LIBS})
-#MESSAGE(STATUS "Found OpenCV version: " ${OpenCV_VERSION})
-#MESSAGE(STATUS "Found include directories: " ${OpenCV_INCLUDE_DIRS})
-#MESSAGE(STATUS "Used as shared library: " ${OpenCV_SHARED})
-#MESSAGE(STATUS "Mangled paths: " ${OpenCV_LIB_COMPONENTS})
 

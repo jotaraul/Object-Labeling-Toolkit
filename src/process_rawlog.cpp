@@ -36,8 +36,6 @@
 #include <mrpt/system/filesystem.h>
 #include <mrpt/math/interp_fit.h>
 
-#include "opencv2/imgproc/imgproc.hpp"
-
 #include <numeric>
 #include <iostream>
 #include <fstream>
@@ -84,7 +82,7 @@ struct TCalibrationConfig{
     bool useDefaultIntrinsics;
     bool applyCLAMS;
     bool scaleDepthInfo;
-    int  equalizeRGBHistograms;
+    bool  equalizeRGBHistograms;
     double truncateDepthInfo;
     bool project3DPointClouds;
     bool remove3DPointClouds;
@@ -219,13 +217,12 @@ void loadConfig()
     if ( setCalibrationParameters )
     {
         calibConfig.useDefaultIntrinsics  = config.read_bool("CALIBRATION","use_default_intrinsics",true,true);
-        calibConfig.equalizeRGBHistograms = config.read_int("CALIBRATION","equalize_RGB_histograms",0,true);
+        calibConfig.equalizeRGBHistograms = config.read_bool("CALIBRATION","equalize_RGB_histograms",false,true);
         calibConfig.truncateDepthInfo     = config.read_double("CALIBRATION","truncate_depth_info",0,true);
         calibConfig.applyCLAMS            = config.read_bool("CALIBRATION","apply_CLAMS_Calibration_if_available",false,true);
         calibConfig.scaleDepthInfo        = config.read_bool("CALIBRATION","scale_depth_info",false,true);
         calibConfig.project3DPointClouds  = config.read_bool("CALIBRATION","project_3D_point_clouds",false,true);
         calibConfig.remove3DPointClouds  = config.read_bool("CALIBRATION","remove_3D_point_clouds",false,true);
-
 
         //
         // Load 2D laser scanners info
@@ -353,49 +350,6 @@ int getSensorPos( const string label )
     }
 
     return -1;
-}
-
-
-//-----------------------------------------------------------
-//
-//                      equalizeCLAHE
-//
-//-----------------------------------------------------------
-
-void equalizeCLAHE( CObservation3DRangeScanPtr obs3D )
-{
-    cv::Mat cvImg = cv::cvarrToMat( obs3D->intensityImage.getAs<IplImage>() );
-
-    cv::Mat lab_image;
-    cv::cvtColor(cvImg, lab_image, CV_BGR2HSV);
-
-    // Extract the L channel
-    std::vector<cv::Mat> lab_planes(3);
-    cv::split(lab_image, lab_planes);  // now we have the L image in lab_planes[0]
-
-    // apply the CLAHE algorithm to the L channel
-    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
-    clahe->setClipLimit(4);
-    cv::Mat dst;
-    clahe->apply(lab_planes[2], dst);
-
-    // Merge the the color planes back into an Lab image
-    dst.copyTo(lab_planes[2]);
-    cv::merge(lab_planes, lab_image);
-
-    // convert back to RGB
-    cv::Mat image_clahe;
-    cv::cvtColor(lab_image, image_clahe, CV_HSV2BGR);
-
-    IplImage* final;
-    final = cvCreateImage(cvSize(image_clahe.cols,image_clahe.rows),8,3);
-    IplImage ipltemp=image_clahe;
-    cvCopy(&ipltemp,final);
-
-    //cout << "N channels: " << final->nChannels << endl;
-
-    obs3D->intensityImage.setFromIplImageReadOnly(final);
-
 }
 
 
@@ -560,12 +514,8 @@ void processRawlog()
 
     if (!calibConfig.equalizeRGBHistograms)
         cout << "off" << endl;
-    else if ( calibConfig.equalizeRGBHistograms == 1 )
-        cout << "on" << endl;
-    else if ( calibConfig.equalizeRGBHistograms == 2 )
-        cout << "on (CLAHE)" << endl;
     else
-        cout << "off (unkwnon method specified)" << endl;
+        cout << "on" << endl;
 
     cout << "  [INFO] Truncating depth information: ";
 
@@ -777,10 +727,8 @@ void processRawlog()
                 }
 
                 // Equalize histogram of RGB images?
-                if ( calibConfig.equalizeRGBHistograms == 1 )
+                if ( calibConfig.equalizeRGBHistograms )
                     obs3D->intensityImage.equalizeHistInPlace();
-                else if ( calibConfig.equalizeRGBHistograms == 2 )
-                    equalizeCLAHE(obs3D);
 
                 o_rawlog << obs3D;
 
