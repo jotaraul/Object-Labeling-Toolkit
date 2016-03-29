@@ -154,7 +154,7 @@ endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 #                           Toolkit-executables
 #------------------------------------------------------------------------------#
 
-ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/src/process_rawlog.cpp)
+ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/apps/process_rawlog.cpp)
 
 if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
         TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
@@ -162,31 +162,31 @@ else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
         TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} )
 endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
-ADD_EXECUTABLE(Mapping ${CMAKE_SOURCE_DIR}/src/mapping.cpp)
+ADD_EXECUTABLE(Mapping ${CMAKE_SOURCE_DIR}/apps/mapping.cpp)
 TARGET_LINK_LIBRARIES(Mapping ${PCL_LIBRARIES} ${MRPT_LIBS} DIFODO )
 
-ADD_EXECUTABLE(Visualize_reconstruction ${CMAKE_SOURCE_DIR}/src/visualize_reconstruction.cpp)
+ADD_EXECUTABLE(Visualize_reconstruction ${CMAKE_SOURCE_DIR}/apps/visualize_reconstruction.cpp)
 TARGET_LINK_LIBRARIES(Visualize_reconstruction ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-ADD_EXECUTABLE(Label_scene ${CMAKE_SOURCE_DIR}/src/label_scene.cpp)
+ADD_EXECUTABLE(Label_scene ${CMAKE_SOURCE_DIR}/apps/label_scene.cpp)
 TARGET_LINK_LIBRARIES(Label_scene ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-ADD_EXECUTABLE(Label_rawlog ${CMAKE_SOURCE_DIR}/src/label_rawlog.cpp)
+ADD_EXECUTABLE(Label_rawlog ${CMAKE_SOURCE_DIR}/apps/label_rawlog.cpp)
 TARGET_LINK_LIBRARIES(Label_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-ADD_EXECUTABLE(Segmentation ${CMAKE_SOURCE_DIR}/src/segmentation.cpp)
+ADD_EXECUTABLE(Segmentation ${CMAKE_SOURCE_DIR}/apps/segmentation.cpp)
 TARGET_LINK_LIBRARIES(Segmentation ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-ADD_EXECUTABLE(Create_video ${CMAKE_SOURCE_DIR}/src/create_video.cpp)
+ADD_EXECUTABLE(Create_video ${CMAKE_SOURCE_DIR}/apps/create_video.cpp)
 TARGET_LINK_LIBRARIES(Create_video ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-ADD_EXECUTABLE(Dataset_statistics ${CMAKE_SOURCE_DIR}/src/dataset_statistics.cpp)
+ADD_EXECUTABLE(Dataset_statistics ${CMAKE_SOURCE_DIR}/apps/dataset_statistics.cpp)
 TARGET_LINK_LIBRARIES(Dataset_statistics ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-ADD_EXECUTABLE(Benchmark ${CMAKE_SOURCE_DIR}/src/benchmark.cpp)
+ADD_EXECUTABLE(Benchmark ${CMAKE_SOURCE_DIR}/apps/benchmark.cpp)
 TARGET_LINK_LIBRARIES(Benchmark ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
-ADD_EXECUTABLE(Calibrate ${CMAKE_SOURCE_DIR}/src/calibrate.cpp)
+ADD_EXECUTABLE(Calibrate ${CMAKE_SOURCE_DIR}/apps/calibrate.cpp)
 TARGET_LINK_LIBRARIES(Calibrate ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
 
