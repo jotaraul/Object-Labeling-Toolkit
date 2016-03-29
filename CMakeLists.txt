@@ -37,6 +37,10 @@ STRING(SUBSTRING "${VERSION_NUMBER}" 0 1 VERSION_NUMBER_MAJOR)
 STRING(SUBSTRING "${VERSION_NUMBER}" 2 1 VERSION_NUMBER_MINOR)
 STRING(SUBSTRING "${VERSION_NUMBER}" 4 1 VERSION_NUMBER_PATCH)
 
+#------------------------------------------------------------------------------#
+#                                 DEPENDENCIES
+#------------------------------------------------------------------------------#
+
 # --------------------------------------------
 # MRPT library:
 # --------------------------------------------
@@ -72,6 +76,24 @@ ADD_LIBRARY(DIFODO ${difodo_sources} ${difodo_headers} )
 
 # Tell CMake that the linker language is C++
 SET_TARGET_PROPERTIES(DIFODO PROPERTIES LINKER_LANGUAGE CXX)
+
+#------------------------------------------------------------------------------#
+#                                  TARGET
+#------------------------------------------------------------------------------#
+
+# Create UPGM++ libraries and add include directories to the examples
+SET( OLT_LIBRARIES "core;processing;mapping;labeling" )
+
+SET(INC_DIR "")
+SET(LIBRARIES "")
+
+FOREACH( LIBRARY ${OLT_LIBRARIES} )
+	ADD_SUBDIRECTORY(libs/${LIBRARY})
+        INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/libs/${LIBRARY})
+	SET(INC_DIR ${INC_DIR}${CMAKE_SOURCE_DIR}/libs/${LIBRARY}\;)
+	SET(LIBRARIES ${LIBRARIES}${PROJECT_BINARY_DIR}/libs/libOLT-${LIBRARY}.so\;)
+	set_target_properties(${LIBRARY} PROPERTIES PREFIX "libOLT-")
+ENDFOREACH( LIBRARY ${OLT_LIBRARIES} )
 
 # --------------------------------------------
 # Compilation flags
