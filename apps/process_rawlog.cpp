@@ -20,6 +20,8 @@
  |                                                                           |
  *---------------------------------------------------------------------------*/
 
+
+
 #include <mrpt/gui.h>
 #include <mrpt/math/utils.h>
 #include <mrpt/maps/CSimplePointsMap.h>
@@ -43,7 +45,7 @@
 #ifdef USING_CLAMS_INTRINSIC_CALIBRATION
     #include <clams/discrete_depth_distortion_model.h>
 #endif
-
+#include "processing.hpp"
 using namespace mrpt;
 using namespace mrpt::utils;
 using namespace mrpt::math;
@@ -70,6 +72,7 @@ bool keepOnlyProcessed = false;
 float removeEmptyObs = 0.0;
 float removeWeirdObs = 0.0;
 bool onlyRemove3DPointClouds;
+bool saveAsPlainText;
 
 string replaceSensorLabel;  // Current sensor label
 string replaceSensorLabelAs;// New sensor label
@@ -85,7 +88,7 @@ struct TCalibrationConfig{
     bool  equalizeRGBHistograms;
     double truncateDepthInfo;
     bool project3DPointClouds;
-    bool remove3DPointClouds;
+    bool remove3DPointClouds;    
 
     TCalibrationConfig() : only2DLaser(false),
         onlyRGBD(false), useDefaultIntrinsics(true), equalizeRGBHistograms(false),
@@ -149,7 +152,8 @@ void showUsageInformation()
             "    -removeWeirdObs <num> : Set to 0 (null) observations with a factor of valid measurements lower than <num>" << endl <<
             "    -remove3DPointClouds: Remove all the point clouds within RGBD observations."
             "    -keepOnlyProcessed: Keep only the observations that have been processed." << endl <<
-            "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl << endl;
+            "    -decimate <num>: Decimate rawlog keeping only one of each <num> observations." << endl <<
+            "    -saveAsPlainText: Save the rawlog as different plain text files. " << endl << endl;
 }
 
 
@@ -903,6 +907,11 @@ int loadParameters(int argc, char* argv[])
                 calibConfig.only2DLaser = true;
                 cout << "  [INFO] Processing only hokuyo observations."  << endl;
             }
+            else if ( !strcmp(argv[arg],"-saveAsPlainText") )
+            {
+                saveAsPlainText = true;
+                cout << "  [INFO] Saving as plain text."  << endl;
+            }
             else if ( !strcmp(argv[arg],"-only_rgbd") )
             {
                 calibConfig.onlyRGBD = true;
@@ -1226,6 +1235,7 @@ void remove3DPointClouds()
     cout << "  [INFO] Rawlog saved as " << o_rawlogFileName << endl << endl;
 }
 
+
 //-----------------------------------------------------------
 //
 //                          main
@@ -1298,6 +1308,21 @@ int main(int argc, char* argv[])
 
         else if ( onlyRemove3DPointClouds )
             remove3DPointClouds();
+
+        else if ( saveAsPlainText )
+        {
+
+            string withoutExtension = i_rawlogFilename.substr(0,i_rawlogFilename.size()-7);
+
+            OLT::CSaveAsPlainText editor;
+
+            editor.setOption("output_file",withoutExtension+".txt");
+            editor.setOption("output_obs_dir",withoutExtension+"/");
+            editor.setOption("generate_point_clouds",1);
+
+            editor.setInputRawlog(i_rawlogFilename);
+            editor.process();
+        }
 
         else if ( setCalibrationParameters )
             processRawlog();

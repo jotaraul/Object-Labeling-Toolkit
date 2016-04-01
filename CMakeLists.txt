@@ -61,6 +61,13 @@ endif(PCL_FOUND)
 #message(PCL_LIBS: ${PCL_LIBRARIES})
 
 # --------------------------------------------
+# OpenCV
+# --------------------------------------------
+
+FIND_PACKAGE( OpenCV REQUIRED )
+
+
+# --------------------------------------------
 # Third party
 # --------------------------------------------
 
@@ -179,9 +186,9 @@ endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/apps/process_rawlog.cpp)
 
 if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
-        TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort)
+        TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort core processing)
 else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
-        TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} )
+        TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} core processing)
 endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
 ADD_EXECUTABLE(Mapping ${CMAKE_SOURCE_DIR}/apps/mapping.cpp)
