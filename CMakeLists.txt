@@ -64,6 +64,7 @@ endif(PCL_FOUND)
 # OpenCV
 # --------------------------------------------
 
+
 FIND_PACKAGE( OpenCV REQUIRED )
 
 
@@ -195,7 +196,7 @@ ADD_EXECUTABLE(Mapping ${CMAKE_SOURCE_DIR}/apps/mapping.cpp)
 TARGET_LINK_LIBRARIES(Mapping ${PCL_LIBRARIES} ${MRPT_LIBS} DIFODO )
 
 ADD_EXECUTABLE(Visualize_reconstruction ${CMAKE_SOURCE_DIR}/apps/visualize_reconstruction.cpp)
-TARGET_LINK_LIBRARIES(Visualize_reconstruction ${PCL_LIBRARIES} ${MRPT_LIBS} )
+TARGET_LINK_LIBRARIES(Visualize_reconstruction ${PCL_LIBRARIES} ${MRPT_LIBS} processing)
 
 ADD_EXECUTABLE(Label_scene ${CMAKE_SOURCE_DIR}/apps/label_scene.cpp)
 TARGET_LINK_LIBRARIES(Label_scene ${PCL_LIBRARIES} ${MRPT_LIBS} )
@@ -210,7 +211,7 @@ ADD_EXECUTABLE(Create_video ${CMAKE_SOURCE_DIR}/apps/create_video.cpp)
 TARGET_LINK_LIBRARIES(Create_video ${PCL_LIBRARIES} ${MRPT_LIBS} )
 
 ADD_EXECUTABLE(Dataset_statistics ${CMAKE_SOURCE_DIR}/apps/dataset_statistics.cpp)
-TARGET_LINK_LIBRARIES(Dataset_statistics ${PCL_LIBRARIES} ${MRPT_LIBS} )
+TARGET_LINK_LIBRARIES(Dataset_statistics ${PCL_LIBRARIES} ${MRPT_LIBS} processing)
 
 ADD_EXECUTABLE(Benchmark ${CMAKE_SOURCE_DIR}/apps/benchmark.cpp)
 TARGET_LINK_LIBRARIES(Benchmark ${PCL_LIBRARIES} ${MRPT_LIBS} )

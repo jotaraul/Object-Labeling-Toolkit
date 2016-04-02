@@ -20,6 +20,8 @@
  |                                                                           |
  *---------------------------------------------------------------------------*/
 
+#include "CAnalyzer.hpp"
+
 #include <mrpt/math.h>
 #include <mrpt/obs/CObservation3DRangeScan.h>
 
@@ -36,6 +38,10 @@ using namespace std;
 //
 //  Data types
 //
+
+vector<string> sensors_to_use;
+CRawlog rawlog;
+bool analyzeDepthInfo = false;
 
 struct TConfiguration
 {
@@ -75,7 +81,9 @@ void showUsageInformation()
             " \t <conf_fil>       : Configuration file." << endl;
     cout << "Then, optional parameters:" << endl <<
             " \t -h      : This help." << endl <<
-            " \t -sensor : Use obs from this sensor (all by default)." << endl;
+            " \t -sensor : Use obs from this sensor (all by default)." << endl <<
+            " \t -analyzeDepthInfo : Analyze depth info." << endl << endl;
+
 }
 
 
@@ -267,6 +275,162 @@ void saveStatsToFile(ostream &statsFile, vector<string> &v_sensorsUsed )
 
 }
 
+int loadParamters(int argc, char* argv[])
+{
+    if ( argc > 1 )
+    {
+        // Get configuration file name
+
+        string configFile = argv[1];
+
+        // Load configuration and initialize stats
+
+        loadConfig(configFile);
+        initializeStats();
+
+        // Get optional paramteres
+        if ( argc > 2 )
+        {
+            size_t arg = 2;
+
+            while ( arg < argc )
+            {
+                if ( !strcmp(argv[arg],"-h") )
+                {
+                    showUsageInformation();
+                    arg++;
+                }
+                else if ( !strcmp(argv[arg],"-sensor") )
+                {
+                    string sensor = argv[arg+1];
+                    sensors_to_use.push_back(  sensor );
+                    arg += 2;
+                }
+                else if ( !strcmp(argv[arg],"-analyzeDepthInfo") )
+                {
+                    analyzeDepthInfo = true;
+                    arg ++;
+                }
+
+                else
+                {
+                    cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
+                    return -1;
+                }
+            }
+        }
+    }
+    else
+    {
+        showUsageInformation();
+
+        return -1;
+    }
+
+}
+
+void generateStats()
+{
+    const size_t N_rawlogs = conf.rawlogFiles.size();
+    cout << "[INFO] a total of " << N_rawlogs << " to process." << endl;
+
+    for ( size_t rawlog_index = 0; rawlog_index < N_rawlogs; rawlog_index++ )
+    {
+        rawlog.loadFromRawLogFile( conf.rawlogFiles[rawlog_index] );
+
+        cout << "[INFO] Processing rawlog file : " << conf.rawlogFiles[rawlog_index];
+        cout << " with " << rawlog.size() << " obs and index " << rawlog_index << endl;
+
+        //
+        // Iterate over the obs into the rawlog updating the stats
+        //
+
+        for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
+        {
+            CObservationPtr obs = rawlog.getAsObservation(obs_index);
+
+            // Check that it is a 3D observation
+            if ( !IS_CLASS(obs, CObservation3DRangeScan) )
+                continue;
+
+            // Check if the sensor is being used
+            if ( !sensors_to_use.empty()
+                 && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
+                 == sensors_to_use.end() )
+                continue;
+
+            // Get obs pose
+            CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
+            obs3D->load();
+
+            size_t rows = obs3D->cameraParams.nrows;
+            size_t cols = obs3D->cameraParams.ncols;
+
+            // Update statistics with information from this observations
+            updateStatsFromObs( obs3D, rows, cols );
+
+        }
+    }
+
+    //
+    //  Save stats to file
+    //
+
+    if ( conf.saveStatisticsToFile )
+    {
+        cout << "[INFO] Saving statistics to " << conf.statisticsOutputFileName << endl;
+        ofstream statsFile(conf.statisticsOutputFileName.c_str(),ios::trunc);
+
+        if ( statsFile.is_open() )
+        {
+            saveStatsToFile(statsFile,sensors_to_use);
+            statsFile.close();
+        }
+        else
+            cout << "[ERROR] Error when opening the file to save the statistics.";
+    }
+
+    saveStatsToFile(cout,sensors_to_use);
+
+    cout << "[INFO] Done!" << endl;
+}
+
+void analyzeDepths()
+{
+    const size_t N_rawlogs = conf.rawlogFiles.size();
+    cout << "[INFO] a total of " << N_rawlogs << " to process." << endl;
+
+    double maxDepth = 0;
+    double minDepth = std::numeric_limits<double>::max();
+    double meanDepth = 0;
+
+    for ( size_t rawlog_index = 0; rawlog_index < N_rawlogs; rawlog_index++ )
+    {
+        OLT::CDepthInfoAnalyzer analyzer;
+
+        analyzer.setInputRawlog( conf.rawlogFiles[rawlog_index] );
+
+        vector<double> results;
+
+        analyzer.process(results);
+
+        if ( results[0] > maxDepth )
+            maxDepth = results[0];
+
+        if ( results[1] < minDepth )
+            minDepth = results[1];
+
+        meanDepth = results[2];
+
+    }
+
+    cout << "  [INFO] Results: " << endl;
+    cout << "         Max depth  = " << maxDepth << endl;
+    cout << "         Min depth  = " << minDepth << endl;
+    cout << "         Mean depth = " << meanDepth / static_cast<double>(N_rawlogs) << endl;
+
+    cout << "[INFO] Done!" << endl;
+}
 
 //-----------------------------------------------------------
 //
@@ -281,52 +445,7 @@ int main(int argc, char* argv[])
     {
         // Useful variables
 
-        vector<string> sensors_to_use;
-        CRawlog rawlog;
-
-        if ( argc > 1 )
-        {
-            // Get configuration file name
-
-            string configFile = argv[1];
-
-            // Load configuration and initialize stats
-
-            loadConfig(configFile);
-            initializeStats();
-
-            // Get optional paramteres
-            if ( argc > 2 )
-            {
-                size_t arg = 2;
-
-                while ( arg < argc )
-                {
-                    if ( !strcmp(argv[arg],"-h") )
-                    {
-                        showUsageInformation();
-                        arg++;
-                    }
-                    else if ( !strcmp(argv[arg],"-sensor") )
-                    {
-                        string sensor = argv[arg+1];
-                        sensors_to_use.push_back(  sensor );
-                        arg += 2;
-                    }
-                    else
-                    {
-                        cout << "[Error] " << argv[arg] << " unknown paramter" << endl;
-                        return -1;
-                    }
-                }
-            }
-        }
-        else
-        {
-            showUsageInformation();
-
-            return -1;
-        }
+        loadParamters(argc, argv);
 
         if ( sensors_to_use.empty() )
             cout << "[INFO] Considering observations from any sensor." << endl;
@@ -338,68 +457,10 @@ int main(int argc, char* argv[])
             cout << endl;
         }
 
-        const size_t N_rawlogs = conf.rawlogFiles.size();
-        cout << "[INFO] a total of " << N_rawlogs << " to process." << endl;
-
-        for ( size_t rawlog_index = 0; rawlog_index < N_rawlogs; rawlog_index++ )
-        {
-            rawlog.loadFromRawLogFile( conf.rawlogFiles[rawlog_index] );
-
-            cout << "[INFO] Processing rawlog file : " << conf.rawlogFiles[rawlog_index];
-            cout << " with " << rawlog.size() << " obs and index " << rawlog_index << endl;
-
-            //
-            // Iterate over the obs into the rawlog updating the stats
-            //
-
-            for ( size_t obs_index = 0; obs_index < rawlog.size(); obs_index++ )
-            {
-                CObservationPtr obs = rawlog.getAsObservation(obs_index);
-
-                // Check that it is a 3D observation
-                if ( !IS_CLASS(obs, CObservation3DRangeScan) )
-                    continue;
-
-                // Check if the sensor is being used
-                if ( !sensors_to_use.empty()
-                     && find(sensors_to_use.begin(), sensors_to_use.end(),obs->sensorLabel)
-                     == sensors_to_use.end() )
-                    continue;
-
-                // Get obs pose
-                CObservation3DRangeScanPtr obs3D = CObservation3DRangeScanPtr(obs);
-                obs3D->load();
-
-                size_t rows = obs3D->cameraParams.nrows;
-                size_t cols = obs3D->cameraParams.ncols;
-
-                // Update statistics with information from this observations
-                updateStatsFromObs( obs3D, rows, cols );
-
-            }
-        }
-
-        //
-        //  Save stats to file
-        //
-
-        if ( conf.saveStatisticsToFile )
-        {
-            cout << "[INFO] Saving statistics to " << conf.statisticsOutputFileName << endl;
-            ofstream statsFile(conf.statisticsOutputFileName.c_str(),ios::trunc);
-
-            if ( statsFile.is_open() )
-            {
-                saveStatsToFile(statsFile,sensors_to_use);
-                statsFile.close();
-            }
-            else
-                cout << "[ERROR] Error when opening the file to save the statistics.";
-        }
-
-        saveStatsToFile(cout,sensors_to_use);
-
-        cout << "[INFO] Done!" << endl;
+        if ( analyzeDepthInfo )
+            analyzeDepths();
+        else
+            generateStats();
 
         return 0;
 

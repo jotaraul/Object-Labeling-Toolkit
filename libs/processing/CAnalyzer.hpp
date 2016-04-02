@@ -20,8 +20,8 @@
  |                                                                           |
  *---------------------------------------------------------------------------*/
 
-#ifndef _OLT_EDITOR_
-#define _OLT_EDITOR_
+#ifndef _OLT_ANALYZER_
+#define _OLT_ANALYZER_
 
 #include "core.hpp"
 
@@ -33,7 +33,7 @@
 
 namespace OLT
 {
-    class CEditor
+    class CAnalyzer
     {
 
     protected:
@@ -89,22 +89,17 @@ namespace OLT
             m_optionsS[option] = value;
         }
 
-        virtual int process() = 0;
+        virtual int process(std::vector<double> &results) = 0;
     };
 
 
-    class CSaveAsPlainText : public CEditor
+    class CDepthInfoAnalyzer : public CAnalyzer
     {
-        /** SaveAsPlainText options:
-          * 'output_file'   : directory to store the sequence information file
-          * 'output_obs_dir': directory where observations have to be stored
-          * 'generate_point_clouds': generate files with point clouds
-          */
     public:
-        int process();
+        int process(std::vector<double> &results);
     private:
-        int processRawlog();
-        int processScene();
+        int processRawlog(std::vector<double> &results);
+        int processScene(std::vector<double> &results);
     };
 }
 

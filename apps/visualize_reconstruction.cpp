@@ -20,6 +20,8 @@
  |                                                                           |
  *---------------------------------------------------------------------------*/
 
+#include "processing.hpp"
+
 #include <mrpt/gui.h>
 
 #include <mrpt/maps/CColouredPointsMap.h>
@@ -75,6 +77,7 @@ float distBetweenPoints = 0.02;
 float pointSize = 3;
 bool equalizeRGBDHist = false;
 bool visualize2Dposes = false;
+bool saveAsPlainText = false;
 
 //-----------------------------------------------------------
 //
@@ -99,7 +102,8 @@ void showUsageInformation()
             "    -poses                 : Show spheres in the scene representing observation poses." << endl <<
             "    -zUpperLimit           : Remove points with a height higher than this paramter." << endl <<
             "    -limit                 : Sets a limit to the number of obs to process." << endl <<
-            "    -lowerLimit            : Sets a lower limit to the number of obs to process." << endl << endl;
+            "    -lowerLimit            : Sets a lower limit to the number of obs to process." << endl <<
+            "    -saveAsPlainText       : If a scene is loaded, save it as plain text." << endl << endl;
 
 }
 
@@ -143,6 +147,14 @@ int loadParameters(int argc, char* argv[])
 
                     sensors_to_use.push_back( sensor );
 
+                }
+                else if ( !strcmp(argv[arg],"-saveAsPlainText") )
+                {
+                    saveAsPlainText = true;
+
+                    cout << "  [INFO] Saving as plain text" << endl;
+
+                    arg++;
                 }
                 else if ( !strcmp(argv[arg],"-decimate") )
                 {
@@ -366,7 +378,7 @@ void buildScene()
 
     while (( obsIndex < N_limitOfObs ) &&
            ( CRawlog::getActionObservationPairOrObservation(i_rawlog,action,
-                                                observations,obs,obsIndex) ))
+                                                            observations,obs,obsIndex) ))
     {
         // Check that it is a 3D observation
         if ( !IS_CLASS(obs, CObservation3DRangeScan) )
@@ -536,10 +548,25 @@ int main(int argc, char* argv[])
         }
         else if ( !i_sceneFilename.empty() )
         {
-            visualizeScene();
 
-            while ( win3D->isOpen() && !win3D->keyHit() )
-                mrpt::system::sleep(10);
+            if ( saveAsPlainText )
+            {
+                string withoutExtension = i_sceneFilename.substr(0,i_sceneFilename.size()-6);
+
+                OLT::CSaveAsPlainText editor;
+
+                editor.setOption("output_file",withoutExtension+"_scene.txt");
+
+                editor.setInputScene(i_sceneFilename);
+                editor.process();
+            }
+            else
+            {
+                visualizeScene();
+
+                while ( win3D->isOpen() && !win3D->keyHit() )
+                    mrpt::system::sleep(10);
+            }
         }
 
         return 0;

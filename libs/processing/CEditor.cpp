@@ -27,9 +27,15 @@
 #include <mrpt/obs/CRawlog.h>
 #include <mrpt/math/lightweight_geom_data.h>
 #include <mrpt/utils/CImage.h>
-
+#include <mrpt/opengl.h>
+#include <mrpt/opengl/CBox.h>
+#include <mrpt/opengl/CText3D.h>
+#include <mrpt/opengl/CPointCloudColoured.h>
 #include <mrpt/utils.h>
-#include <opencv2/core/core.hpp>
+#include <mrpt/poses/CPose3D.h>
+
+#include <opencv2/opencv.hpp>
+
 
 using namespace OLT;
 using namespace std;
@@ -38,9 +44,19 @@ using namespace mrpt;
 using namespace mrpt::obs;
 using namespace mrpt::math;
 using namespace mrpt::utils;
+using namespace mrpt::opengl;
+using namespace mrpt::poses;
 
 
 int CSaveAsPlainText::process()
+{
+    if ( m_iRawlog.is_open() )
+        return processRawlog();
+    else
+        return processScene();
+}
+
+int CSaveAsPlainText::processRawlog()
 {
     cout << "  [INFO] Saving as human readable " << endl;
     string outputFile = ".";
@@ -172,54 +188,112 @@ int CSaveAsPlainText::process()
 
             if ( obs3D->hasPixelLabels() )
             {
+                int N_cols, N_rows;
+                obs3D->pixelLabels->getSize(N_rows,N_cols);
+
+                file << N_rows << endl;
+                file << N_cols << endl;
+
+                fileName = format("%s%lu_labels.txt",outputObsDir.c_str(),obsIndex);
+                file.open(fileName.c_str());
+
+                file << "#This file contains a labelled matrix/mask, associated with RGB-D images with the same id. \n"
+                        "#Its format is: \n"
+                        "#[number_of_labels/categories] \n"
+                        "#[label_id_0] [label_string_0] \n"
+                        " ... \n"
+                        "#[label_id_n] [label_string_n] \n"
+                        "#[number_of_rows_of_the_matrix] \n"
+                        "#[number_of_cols_of_the_matrix] \n"
+                        "#[labelled_matrix/mask] \n"
+                        "#The elements/pixels of the matrix must be interpreted as string of bites, \n"
+                        "#so a bit with value 1 means that the element belongs to the label \n"
+                        "#which label_id matchs the bit position. For example, if an element has \n"
+                        "#the value 1010, this means that is belongs to the labels with id 1 and 3. \n"
+                        "#In this way an element can belong to more than one label. \n";
+
+
+                std::map<uint32_t,std::string>::iterator it;
+
+                file << obs3D->pixelLabels->pixelLabelNames.size() << endl;
+
+                for ( it = obs3D->pixelLabels->pixelLabelNames.begin();
+                      it != obs3D->pixelLabels->pixelLabelNames.end(); it++ )
+                {
+                    file <<  it->first << " " << it->second << endl;
+                }
+
+
+
+                for ( int row = 0; row < N_rows; row++ )
+                {
+                    for ( int col = 0; col < N_cols; col++ )
+                    {
+                        uint64_t labels;
+                        obs3D->pixelLabels->getLabels(row,col,labels);
+                        file << static_cast<int>(labels) << " ";
+                    }
+
+                    file << endl;
+                }
+
+                file.close();
+            }
+
+
+            if ( obs3D->hasRangeImage )
+            {
+
+                int N_rows = obs3D->rangeImage.rows();
+                int N_cols = obs3D->rangeImage.cols();
+
                 if ( 1 )
                 {
-                    cv::Mat img(2,2, CV_8UC3);
+                    uint16_t max = numeric_limits<uint16_t>::max();
+
+                    double maxValue = 10;
+                    double factor = static_cast<double>(max)/maxValue;
+
+                    cv::Mat img(N_rows,N_cols, CV_16UC1);
+
+                    for ( int row = 0; row < N_rows; row++ )
+                        for ( int col = 0; col < N_cols; col++ )
+                        {
+                            double value = obs3D->rangeImage(row,col);
+                            uint16_t finalValue = static_cast<uint16_t>(value*factor);
+
+                            img.at<uint16_t>(row,col) = finalValue;
+                        }
+
+                    fileName = format("%s%lu_depth.png",outputObsDir.c_str(),obsIndex);
+                    vector<int> compression_params;
+                    compression_params.push_back(CV_IMWRITE_PNG_COMPRESSION);
+                    compression_params.push_back(0);
+
+                    cv::imwrite(fileName,img,compression_params);
+
+                    // Load to check that it's ok
+                    //cv::Mat image = cv::imread(fileName,CV_LOAD_IMAGE_UNCHANGED);
                 }
                 else
                 {
-                    fileName = format("%s%lu_labels.txt",outputObsDir.c_str(),obsIndex);
+
+
+                    fileName = format("%s%lu_depth.txt",outputObsDir.c_str(),obsIndex);
                     file.open(fileName.c_str());
 
-                    file << "#This file contains a labelled matrix/mask, associated with RGB-D images with the same id. \n"
+                    file << "#This file contains the depth image associated with the RGB image with the same id. \n"
                             "#Its format is: \n"
-                            "#[number_of_labels/categories] \n"
-                            "#[label_id_0] [label_string_0] \n"
-                            " ... \n"
-                            "#[label_id_n] [label_string_n] \n"
-                            "#[number_of_rows_of_the_matrix] \n"
-                            "#[number_of_cols_of_the_matrix] \n"
-                            "#[labelled_matrix/mask] \n"
-                            "#The elements/pixels of the matrix must be interpreted as string of bites, \n"
-                            "#so a bit with value 1 means that the element belongs to the label \n"
-                            "#which label_id matchs the bit position. For example, if an element has \n"
-                            "#the value 1010, this means that is belongs to the labels with id 1 and 3. \n"
-                            "#In this way an element can belong to more than one label. \n";
-
-
-                    std::map<uint32_t,std::string>::iterator it;
-
-                    file << obs3D->pixelLabels->pixelLabelNames.size() << endl;
-
-                    for ( it = obs3D->pixelLabels->pixelLabelNames.begin();
-                          it != obs3D->pixelLabels->pixelLabelNames.end(); it++ )
-                    {
-                        file <<  it->first << " " << it->second << endl;
-                    }
-
-                    int N_cols, N_rows;
-                    obs3D->pixelLabels->getSize(N_rows,N_cols);
-
-                    file << N_rows << endl;
-                    file << N_cols << endl;
+                            "#[number_of_rows] \n"
+                            "#[number_of_cols] \n"
+                            "#[matrix_of_depths] \n"
+                            "#Units are meters \n";
 
                     for ( int row = 0; row < N_rows; row++ )
                     {
                         for ( int col = 0; col < N_cols; col++ )
                         {
-                            uint64_t labels;
-                            obs3D->pixelLabels->getLabels(row,col,labels);
-                            file << static_cast<int>(labels) << " ";
+                            file << trunc(1000 * obs3D->rangeImage(row,col) )/ 1000 << " ";
                         }
 
                         file << endl;
@@ -227,40 +301,6 @@ int CSaveAsPlainText::process()
 
                     file.close();
                 }
-            }
-
-            if ( obs3D->hasRangeImage )
-            {
-                CImage imgDepth;
-                imgDepth.setFromMatrix(obs3D->rangeImage);
-
-                fileName = format("%s%lu_depth.png",outputObsDir.c_str(),obsIndex);
-                imgDepth.saveToFile(fileName);
-
-                fileName = format("%s%lu_depth.txt",outputObsDir.c_str(),obsIndex);
-                file.open(fileName.c_str());
-
-                file << "#This file contains the depth image associated with the RGB image with the same id. \n"
-                        "#Its format is: \n"
-                        "#[number_of_rows] \n"
-                        "#[number_of_cols] \n"
-                        "#[matrix_of_depths] \n"
-                        "#Units are meters \n";
-
-                int N_rows = obs3D->rangeImage.rows();
-                int N_cols = obs3D->rangeImage.cols();
-
-                for ( int row = 0; row < N_rows; row++ )
-                {
-                    for ( int col = 0; col < N_cols; col++ )
-                    {
-                        file << trunc(1000 * obs3D->rangeImage(row,col) )/ 1000 << " ";
-                    }
-
-                    file << endl;
-                }
-
-                file.close();
             }
             //obs3D->rangeImage.saveToTextFile(format("./external/%d_depth.txt",obsIndex),mrpt::math::MATRIX_FORMAT_FIXED);//_convertToExternalStorage(format("./external/%d_depth.txt",obsIndex),"./");
             if ( obs3D->hasIntensityImage )
@@ -276,5 +316,85 @@ int CSaveAsPlainText::process()
 
     cout << endl << "  [INFO] Done!" << endl << endl;
 
+    return 1;
+}
+
+int CSaveAsPlainText::processScene()
+{
+    string outputFile = ".";
+
+    if (m_optionsS.count("output_file"))
+        outputFile = m_optionsS["output_file"];
+
+    ofstream sceneFile(outputFile.c_str());
+
+    cout << "  [INFO] Saving as human readable in " << outputFile << endl;
+
+    vector<string> v_labels;
+    vector<vector<TPoint3D> > v_corners;
+
+    // Load previously inserted boxes
+    bool keepLoading = true;
+    size_t boxes_inserted = 0;
+
+    while ( keepLoading )
+    {
+        CText3DPtr text = m_scene.getByClass<CText3D>(boxes_inserted);
+
+        if ( !text.null() )
+            v_labels.push_back(text->getString());
+        else
+            v_labels.push_back("none");
+
+        CBoxPtr box = m_scene.getByClass<CBox>(boxes_inserted);
+
+        if ( box.null() )
+            keepLoading = false;
+        else
+        {
+            TPose3D pose = box->getPose();
+
+            TPoint3D c1,c2;
+            box->getBoxCorners(c1,c2);
+
+            TPoint3D C111 ( CPose3D(pose) + TPose3D(TPoint3D(c1.x,c1.y,c1.z)) );
+            TPoint3D C222 ( CPose3D(pose) + TPose3D(TPoint3D(c2.x,c2.y,c2.z)) );
+
+            vector<TPoint3D> v;
+            v.push_back(C111);
+            v.push_back(C222);
+
+            v_corners.push_back(v);
+        }
+
+        boxes_inserted++;
+    }
+
+    size_t N_corners = v_corners.size();
+
+    sceneFile << N_corners << endl;
+
+    for ( size_t i = 0; i < N_corners; i++ )
+    {
+        sceneFile << v_labels[i] << endl;
+        sceneFile << v_corners[i][0].x << " " << v_corners[i][0].y << " " << v_corners[i][0].z << endl;
+        sceneFile << v_corners[i][1].x << " " << v_corners[i][1].y << " " << v_corners[i][1].z << endl;
+    }
+
+    CPointCloudColouredPtr gl_points = m_scene.getByClass<CPointCloudColoured>(0);
+    size_t N_points = gl_points->size();
+    sceneFile << N_points << endl;
+
+    for ( size_t i = 0; i < N_points; i++ )
+    {
+        CPointCloudColoured::TPointColour point = gl_points->getPoint(i);
+
+        sceneFile << point.x << " " << point.y << " " << point.z << " "
+                  << point.R << " " << point.G << " " << point.B << endl;
+    }
+
+    cout << "  [INFO] Done! " << endl << endl;
+
+    return 1;
 }
 
