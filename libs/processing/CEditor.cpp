@@ -315,13 +315,14 @@ int CSaveAsPlainText::processRawlog()
             }
         }
 
-
-        sequenceFile.close();
-
-        cout << endl << "  [INFO] Done!" << endl << endl;
-
-        return 1;
     }
+
+    sequenceFile.close();
+
+    cout << endl << "  [INFO] Done!" << endl << endl;
+
+    return 1;
+
 }
 
 int CSaveAsPlainText::processScene()
@@ -418,7 +419,7 @@ int CSaveAsPlainText::processScene()
                      "#Its format is: \n"
                      "#[number_of_points] \n"
                      "#[point1_x] [point1_y] [point1_z] [point1_color_R] [point1_color_G] [point1_color_B]\n"
-                     "# ..."
+                     "# ... \n"
                      "#[pointn_x] [pointn_y] [pointn_z] [pointn_color_R] [pointn_color_G] [pointn_color_B]\n";
     }
 
