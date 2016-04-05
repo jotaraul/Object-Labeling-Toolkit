@@ -52,11 +52,11 @@ FIND_PACKAGE( MRPT REQUIRED slam;gui;hwdrivers;gui;vision;topography)
 # --------------------------------------------
 
 find_package(PCL 1.7 REQUIRED)
-if (PCL_FOUND)
+IF (PCL_FOUND)
 	INCLUDE_DIRECTORIES(${PCL_INCLUDE_DIRS})
 	link_directories(${PCL_LIBRARY_DIRS})
 	add_definitions(${PCL_DEFINITIONS})
-endif(PCL_FOUND)
+ENDIF(PCL_FOUND)
 
 #message(PCL_LIBS: ${PCL_LIBRARIES})
 
@@ -64,9 +64,13 @@ endif(PCL_FOUND)
 # OpenCV
 # --------------------------------------------
 
+set(OLT_USING_OPENCV "FALSE" CACHE BOOL
+  "Check if you want to use OpenCV at different parts of OLT (no mandatory).")
 
-FIND_PACKAGE( OpenCV REQUIRED )
-
+IF (OLT_USING_OPENCV)
+	FIND_PACKAGE( OpenCV REQUIRED )
+	add_definitions(-DUSING_OPENCV)
+ENDIF (OLT_USING_OPENCV)
 
 # --------------------------------------------
 # Third party
@@ -148,7 +152,7 @@ set(CMAKE_DEBUG_POSTFIX  "-dbg")
 set(OLT_USING_CLAMS_INTRINSIC_CALIBRATION "FALSE" CACHE BOOL
   "Check if an intrinsic calibration by CLAMS of the RGB-D sensors within the dataset is available.")
 
-if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+IF (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 	MESSAGE("Using CLAMS intrinsitc calibration of RGB-D sensors")
 	add_definitions(-DUSING_CLAMS_INTRINSIC_CALIBRATION)
 
@@ -175,9 +179,9 @@ if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 	# Tell CMake that the linker language is C++
 	SET_TARGET_PROPERTIES(Undistort PROPERTIES LINKER_LANGUAGE CXX)
 
-else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+ELSE (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 	MESSAGE("Non using CLAMS intrisic calibration of RGB-D sensors")
-endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+ENDIF(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
 
 #------------------------------------------------------------------------------#
@@ -186,11 +190,11 @@ endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
 ADD_EXECUTABLE(Process_rawlog ${CMAKE_SOURCE_DIR}/apps/process_rawlog.cpp)
 
-if (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+IF (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
         TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} Undistort core processing)
-else (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+ELSE (OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
         TARGET_LINK_LIBRARIES(Process_rawlog ${PCL_LIBRARIES} ${MRPT_LIBS} core processing)
-endif(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
+ENDIF(OLT_USING_CLAMS_INTRINSIC_CALIBRATION)
 
 ADD_EXECUTABLE(Mapping ${CMAKE_SOURCE_DIR}/apps/mapping.cpp)
 TARGET_LINK_LIBRARIES(Mapping ${PCL_LIBRARIES} ${MRPT_LIBS} DIFODO )

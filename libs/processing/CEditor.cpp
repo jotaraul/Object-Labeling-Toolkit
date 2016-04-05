@@ -34,7 +34,9 @@
 #include <mrpt/utils.h>
 #include <mrpt/poses/CPose3D.h>
 
+#ifdef USING_OPENCV
 #include <opencv2/opencv.hpp>
+#endif
 
 
 using namespace OLT;
@@ -142,7 +144,7 @@ int CSaveAsPlainText::processRawlog()
                     "# [vector_of_scans] \n"
                     "# [vector_of_valid_scans] \n"
                     "# The aperture of the sensor is in radians, the maximum range \n"
-                    "# and measurements are in meters. \n";
+                    "# and measurements are in meters. '1' means a valid scan, '0' otherwise.\n";
 
 
             file << obs2D->aperture << endl;
@@ -159,9 +161,6 @@ int CSaveAsPlainText::processRawlog()
 
             file << endl;
 
-            //            std::vector<float>   scan; //!< The range values of the scan, in meters. Must have same length than \a validRange
-            //            std::vector<char>    validRange;  //!< It's false (=0) on no reflected rays, referenced to elements in \a scan
-
             file.close();
         }
         else if (IS_CLASS(obs, CObservation3DRangeScan))
@@ -171,8 +170,11 @@ int CSaveAsPlainText::processRawlog()
 
             ofstream  file;
 
-            if ( m_optionsD["generate_point_clouds"] && obs3D->hasPoints3D )
+            if ( m_optionsD["generate_point_clouds"] )
             {
+                if ( !obs3D->hasPoints3D )
+                    obs3D->project3DPointsFromDepthImage();
+
                 fileName = format("%s%lu_points.txt",outputObsDir.c_str(),obsIndex);
                 file.open(fileName.c_str());
 
@@ -197,11 +199,11 @@ int CSaveAsPlainText::processRawlog()
                 fileName = format("%s%lu_labels.txt",outputObsDir.c_str(),obsIndex);
                 file.open(fileName.c_str());
 
-                file << "#This file contains a labelled matrix/mask, associated with RGB-D images with the same id. \n"
+                file << "#This file contains a labelled matrix/mask, associated with the RGB-D images with the same id. \n"
                         "#Its format is: \n"
                         "#[number_of_labels/categories] \n"
                         "#[label_id_0] [label_string_0] \n"
-                        " ... \n"
+                        "# ... \n"
                         "#[label_id_n] [label_string_n] \n"
                         "#[number_of_rows_of_the_matrix] \n"
                         "#[number_of_cols_of_the_matrix] \n"
@@ -247,7 +249,7 @@ int CSaveAsPlainText::processRawlog()
                 int N_rows = obs3D->rangeImage.rows();
                 int N_cols = obs3D->rangeImage.cols();
 
-                if ( 1 )
+#ifdef USING_OPENCV
                 {
                     uint16_t max = numeric_limits<uint16_t>::max();
 
@@ -275,7 +277,7 @@ int CSaveAsPlainText::processRawlog()
                     // Load to check that it's ok
                     //cv::Mat image = cv::imread(fileName,CV_LOAD_IMAGE_UNCHANGED);
                 }
-                else
+#else
                 {
 
 
@@ -301,22 +303,25 @@ int CSaveAsPlainText::processRawlog()
 
                     file.close();
                 }
-            }
-            //obs3D->rangeImage.saveToTextFile(format("./external/%d_depth.txt",obsIndex),mrpt::math::MATRIX_FORMAT_FIXED);//_convertToExternalStorage(format("./external/%d_depth.txt",obsIndex),"./");
-            if ( obs3D->hasIntensityImage )
-            {
-                fileName = format("%s%lu_intensity.png",outputObsDir.c_str(),obsIndex);
-                obs3D->intensityImage.saveToFile(fileName,100);
-            }
+#endif
 
+                //obs3D->rangeImage.saveToTextFile(format("./external/%d_depth.txt",obsIndex),mrpt::math::MATRIX_FORMAT_FIXED);//_convertToExternalStorage(format("./external/%d_depth.txt",obsIndex),"./");
+                if ( obs3D->hasIntensityImage )
+                {
+                    fileName = format("%s%lu_intensity.png",outputObsDir.c_str(),obsIndex);
+                    obs3D->intensityImage.saveToFile(fileName,100);
+                }
+
+            }
         }
+
+
+        sequenceFile.close();
+
+        cout << endl << "  [INFO] Done!" << endl << endl;
+
+        return 1;
     }
-
-    sequenceFile.close();
-
-    cout << endl << "  [INFO] Done!" << endl << endl;
-
-    return 1;
 }
 
 int CSaveAsPlainText::processScene()
@@ -332,6 +337,7 @@ int CSaveAsPlainText::processScene()
 
     vector<string> v_labels;
     vector<vector<TPoint3D> > v_corners;
+    vector<CPose3D> v_poses;
 
     // Load previously inserted boxes
     bool keepLoading = true;
@@ -352,19 +358,21 @@ int CSaveAsPlainText::processScene()
             keepLoading = false;
         else
         {
-            TPose3D pose = box->getPose();
+            CPose3D pose = box->getPose();
 
             TPoint3D c1,c2;
             box->getBoxCorners(c1,c2);
 
-            TPoint3D C111 ( CPose3D(pose) + TPose3D(TPoint3D(c1.x,c1.y,c1.z)) );
-            TPoint3D C222 ( CPose3D(pose) + TPose3D(TPoint3D(c2.x,c2.y,c2.z)) );
+            TPoint3D C111 ( pose + static_cast<TPose3D>(TPoint3D(c1.x,c1.y,c1.z)) );
+            TPoint3D C222 ( pose + static_cast<TPose3D>(TPoint3D(c2.x,c2.y,c2.z)) );
 
             vector<TPoint3D> v;
             v.push_back(C111);
             v.push_back(C222);
 
             v_corners.push_back(v);
+
+            v_poses.push_back(pose);
         }
 
         boxes_inserted++;
@@ -372,13 +380,46 @@ int CSaveAsPlainText::processScene()
 
     size_t N_corners = v_corners.size();
 
-    sceneFile << N_corners << endl;
+    // Is it a labelled scene?
 
-    for ( size_t i = 0; i < N_corners; i++ )
+    if ( N_corners > 0 )
     {
-        sceneFile << v_labels[i] << endl;
-        sceneFile << v_corners[i][0].x << " " << v_corners[i][0].y << " " << v_corners[i][0].z << endl;
-        sceneFile << v_corners[i][1].x << " " << v_corners[i][1].y << " " << v_corners[i][1].z << endl;
+        sceneFile << "#This file contains a labelled 3D point cloud of a reconstructed scene. \n"
+                     "#Its format is: \n"
+                     "#[number_of_bounding_boxes/labels] \n"
+                     "#[bounding_box_1_label] \n"
+                     "#[bb1_pose_x] [bb1_pose_y] [bb1_pose_z] [bb1_pose_yaw] [bb1_pose_pitch] [bb1_pose_roll] \n"
+                     "#[bb1_corner1_x] [bb1_corner1_y] [bb1_corner1_z] \n"
+                     "#[bb1_corner2_x] [bb1_corner2_y] [bb1_corner2_z] \n"
+                     "# ..."
+                     "#[bbn_pose_x] [bbn_pose_y] [bbn_pose_z] [bbn_pose_yaw] [bbn_pose_pitch] [bbn_pose_roll] \n"
+                     "#[bbn_corner1_x] [bbn_corner1_y] [bbn_corner1_z] \n"
+                     "#[bbn_corner2_x] [bbn_corner2_y] [bbn_corner2_z] \n"
+                     "#[number_of_points] \n"
+                     "#[point1_x] [point1_y] [point1_z] [point1_color_R] [point1_color_G] [point1_color_B]\n"
+                     "# ..."
+                     "#[pointn_x] [pointn_y] [pointn_z] [pointn_color_R] [pointn_color_G] [pointn_color_B]\n";
+
+        sceneFile << N_corners << endl;
+
+        for ( size_t i = 0; i < N_corners; i++ )
+        {
+            sceneFile << v_labels[i] << endl;
+            sceneFile << v_poses[i].x() << " " << v_poses[i].y() << " " << v_poses[i].z() << " "
+                      << v_poses[i].yaw() << " " << v_poses[i].pitch() << " " << v_poses[i].roll() << endl;
+            sceneFile << v_corners[i][0].x << " " << v_corners[i][0].y << " " << v_corners[i][0].z << endl;
+            sceneFile << v_corners[i][1].x << " " << v_corners[i][1].y << " " << v_corners[i][1].z << endl;
+        }
+
+    }
+    else
+    {
+        sceneFile << "#This file contains a 3D point cloud of a reconstructed scene. \n"
+                     "#Its format is: \n"
+                     "#[number_of_points] \n"
+                     "#[point1_x] [point1_y] [point1_z] [point1_color_R] [point1_color_G] [point1_color_B]\n"
+                     "# ..."
+                     "#[pointn_x] [pointn_y] [pointn_z] [pointn_color_R] [pointn_color_G] [pointn_color_B]\n";
     }
 
     CPointCloudColouredPtr gl_points = m_scene.getByClass<CPointCloudColoured>(0);

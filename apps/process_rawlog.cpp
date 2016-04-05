@@ -1318,7 +1318,7 @@ int main(int argc, char* argv[])
 
             editor.setOption("output_file",withoutExtension+".txt");
             editor.setOption("output_obs_dir",withoutExtension+"/");
-            editor.setOption("generate_point_clouds",1);
+            editor.setOption("generate_point_clouds",0);
 
             editor.setInputRawlog(i_rawlogFilename);
             editor.process();
